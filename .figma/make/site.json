@@ -1,0 +1,10 @@
+{
+  "description": "This web application helps students plan their academic courses by providing personalized subject recommendations based on their degree requirements.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

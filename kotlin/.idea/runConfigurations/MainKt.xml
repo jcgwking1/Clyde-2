@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="MainKt" type="JetRunConfigurationType" factoryName="Kotlin" nameIsGenerated="true">
+    <option name="MAIN_CLASS_NAME" value="com.courseadvisor.MainKt" />
+    <module name="course-advisor-system.main" />
+    <shortenClasspath name="NONE" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

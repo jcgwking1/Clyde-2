@@ -1,0 +1,53 @@
+# Dependencies & Node
+node_modules/
+dist/
+.cache/
+.env*
+.vite/
+vite.config.*.timestamp-*
+*.tsbuildinfo
+*-debug.log*
+logs/
+*.log
+.claude-replay.*
+.tmp-*
+/.figma/design-context/
+/.plugins/
+/.opencode-skills/
+
+# Gradle & Build Caches
+.gradle/
+**/.gradle/
+build/
+**/build/
+.kotlin/
+**/.kotlin/
+
+# Android build outputs & local config
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+local.properties
+**/local.properties
+captures/
+**/captures/
+.externalNativeBuild
+.cxx
+
+# IDE & Editor files
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+**/.idea/workspace.xml
+**/.idea/tasks.xml
+**/.idea/shelf/
+*.iml
+**/*.iml
+.vscode/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
