@@ -68,10 +68,10 @@ fun CourseAdvisorApp() {
                 title = {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Water, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = EmeraldPrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "J.A.K.E.V Edu",
+                                text = "J.A.K.E.V. Edu",
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 18.sp,
                                 color = TextDark

@@ -83,11 +83,11 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Subject Confidence", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
+                    Text("Preferred Study Pace", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
                     Surface(color = SageLight, shape = RoundedCornerShape(8.dp)) {
                         Text(
-                            text = "$confidence / 10",
-                            fontSize = 13.sp,
+                            text = "${if (confidence >= 7) "Full Load" else if (confidence >= 4) "Balanced" else "Light"} · Level $confidence/10",
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = EmeraldPrimary,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -108,8 +108,8 @@ fun SettingsScreen(
                 )
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("More support needed", fontSize = 11.sp, color = TextMuted)
-                    Text("Ready for challenge", fontSize = 11.sp, color = TextMuted)
+                    Text("Light Load (~12 units)", fontSize = 11.sp, color = TextMuted)
+                    Text("Full Load (18 units)", fontSize = 11.sp, color = TextMuted)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

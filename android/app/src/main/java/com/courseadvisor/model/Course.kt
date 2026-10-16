@@ -7,7 +7,9 @@ data class Course(
     val term: Int,
     val pre: List<String> = emptyList(),
     val co: String? = null,
-    val category: CourseCategory = CourseCategory.fromCode(code)
+    val category: CourseCategory = CourseCategory.fromCode(code),
+    val difficulty: Double = 6.2,
+    val isCapstone: Boolean = false
 )
 
 data class WorkloadEvaluation(
@@ -15,5 +17,6 @@ data class WorkloadEvaluation(
     val confidence: Int,
     val stressScore: Int,
     val rating: String,
-    val description: String
+    val description: String,
+    val recommendedCredits: Int = 15
 )

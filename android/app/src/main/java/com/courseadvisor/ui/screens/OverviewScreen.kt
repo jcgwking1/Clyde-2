@@ -12,7 +12,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.School
-import androidx.compose.material.icons.filled.Spa
+import androidx.compose.material.icons.filled.Water
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,6 +28,7 @@ import com.courseadvisor.model.Course
 import com.courseadvisor.service.CourseAdvisorEngine
 import com.courseadvisor.ui.components.CourseRowItem
 import com.courseadvisor.ui.components.StatCard
+import com.courseadvisor.ui.components.subtleOceanContour
 import com.courseadvisor.ui.theme.*
 
 @Composable
@@ -55,26 +56,27 @@ fun OverviewScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundMint)
+            .background(BackgroundOcean)
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(vertical = 16.dp)
     ) {
-        // Hero Journey Banner
+        // Hero Journey Banner with Ocean Blue Gradient & Wave Accent
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = EmeraldPrimary)
+                colors = CardDefaults.cardColors(containerColor = OceanPrimary)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(EmeraldPrimary, EmeraldDark)
+                                colors = listOf(OceanPrimary, OceanDark)
                             )
                         )
+                        .subtleOceanContour()
                         .padding(20.dp)
                 ) {
                     Column {
@@ -109,7 +111,7 @@ fun OverviewScreen(
                             onClick = onNavigateToPlanner,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color.White,
-                                contentColor = EmeraldPrimary
+                                contentColor = OceanPrimary
                             ),
                             shape = RoundedCornerShape(12.dp)
                         ) {
@@ -155,13 +157,13 @@ fun OverviewScreen(
                     title = "Adviser load",
                     value = "${engine.recommendedUnitCap(confidence)} units",
                     detail = "Based on confidence $confidence/10",
-                    icon = Icons.Default.Spa,
+                    icon = Icons.Default.Water,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
 
-        // Workload Gauge Card
+        // Workload Gauge Card with Ocean Contour
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -169,7 +171,12 @@ fun OverviewScreen(
                 colors = CardDefaults.cardColors(containerColor = SurfaceWhite),
                 elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .background(Brush.linearGradient(listOf(SurfaceWhite, OceanSurface)))
+                        .subtleOceanContour()
+                        .padding(16.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -179,7 +186,7 @@ fun OverviewScreen(
                             Text("A balanced semester", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextDark)
                             Text("Room to learn. Space to breathe.", fontSize = 12.sp, color = TextMuted)
                         }
-                        Icon(Icons.Default.Spa, contentDescription = null, tint = EmeraldPrimary)
+                        Icon(Icons.Default.Water, contentDescription = null, tint = OceanPrimary)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -192,7 +199,7 @@ fun OverviewScreen(
                             text = "${workload.stressScore}",
                             fontSize = 32.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = EmeraldPrimary
+                            color = OceanPrimary
                         )
                         Text(
                             text = "/100",
@@ -202,12 +209,12 @@ fun OverviewScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Surface(
-                            color = if (workload.stressScore < 65) SuccessGreenBg else WarningAmberBg,
+                            color = if (workload.stressScore < 65) OceanLight else WarningAmberBg,
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Text(
                                 text = workload.rating,
-                                color = if (workload.stressScore < 65) SuccessGreen else WarningAmber,
+                                color = if (workload.stressScore < 65) OceanPrimary else WarningAmber,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -222,8 +229,8 @@ fun OverviewScreen(
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        color = if (workload.stressScore < 65) EmeraldPrimary else WarningAmber,
-                        trackColor = SageLight
+                        color = if (workload.stressScore < 65) OceanPrimary else WarningAmber,
+                        trackColor = OceanLight
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -248,7 +255,7 @@ fun OverviewScreen(
                     Text("Recommended based on prerequisites", fontSize = 12.sp, color = TextMuted)
                 }
                 TextButton(onClick = onNavigateToPlanner) {
-                    Text("View all", color = EmeraldPrimary)
+                    Text("View all", color = OceanPrimary)
                 }
             }
         }
@@ -262,14 +269,17 @@ fun OverviewScreen(
                     colors = CardDefaults.cardColors(containerColor = SurfaceWhite)
                 ) {
                     Column(
-                        modifier = Modifier.padding(20.dp),
+                        modifier = Modifier
+                            .background(Brush.linearGradient(listOf(SurfaceWhite, OceanSurface)))
+                            .subtleOceanContour()
+                            .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text("No courses planned for this semester.", color = TextMuted, fontSize = 13.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = onGeneratePlan,
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
+                            colors = ButtonDefaults.buttonColors(containerColor = OceanPrimary)
                         ) {
                             Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
