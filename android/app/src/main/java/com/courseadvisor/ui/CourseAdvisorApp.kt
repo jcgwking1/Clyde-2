@@ -189,6 +189,8 @@ fun CourseAdvisorApp() {
     // Student Onboarding / Profile Setup Dialog (No-Auth Intake Gate)
     if (showOnboarding) {
         var inputName by remember { mutableStateOf(studentName.ifBlank { "" }) }
+        var selectedProgramIndex by remember { mutableIntStateOf(0) }
+        var programExpanded by remember { mutableStateOf(false) }
         var selectedStandingIndex by remember { mutableIntStateOf(2) } // default 3rd Year
         val standings = listOf("1st Year", "2nd Year", "3rd Year", "4th Year")
         val standingTerms = listOf(0, 2, 4, 7)
@@ -228,8 +230,7 @@ fun CourseAdvisorApp() {
                         "BSA Agronomy · Agriculture (178 Units)",
                         "BS Fisheries · CFMS (183 Units)"
                     )
-                    var selectedProgramIndex by remember { mutableIntStateOf(0) }
-                    var programExpanded by remember { mutableStateOf(false) }
+
 
                     Text("Degree Program & Prospectus", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextDark)
                     Box(modifier = Modifier.fillMaxWidth()) {
