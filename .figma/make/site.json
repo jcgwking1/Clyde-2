@@ -1,4 +1,6 @@
 {
+  "title": "Course Advisor | J.A.K.E.V. Edu",
+  "language": "en",
   "description": "This web application helps students plan their academic courses by providing personalized subject recommendations based on their degree requirements.",
   "robots": {
     "index": false

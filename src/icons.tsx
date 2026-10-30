@@ -6,6 +6,7 @@ export default function Icon({name,size=20,...props}:{name:string;size?:number;c
  graph:<><rect x="9" y="2" width="6" height="5" rx="1"/><rect x="2" y="17" width="6" height="5" rx="1"/><rect x="16" y="17" width="6" height="5" rx="1"/><path d="M12 7v5M5 17v-5h14v5"/></>,
  chart:<><path d="M4 3v18h17M9 16v-5m5 5V7m5 9v-3"/></>,
  settings:<><path d="m9 3-1 3-3 1-2 4 2 2v4l4 2 3-1 3 1 4-2v-4l2-2-2-4-3-1-1-3Z"/><circle cx="12" cy="11" r="3"/></>,
+ menu:<><path d="M4 6h16M4 12h16M4 18h16"/></>,
  arrow:<path d="M4 12h16m-6-6 6 6-6 6"/>,
  chevron:<path d="m9 5 7 7-7 7"/>,
  check:<path d="m5 12 4 4L19 6"/>,
@@ -25,5 +26,5 @@ export default function Icon({name,size=20,...props}:{name:string;size?:number;c
  compass:<><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></>,
  star:<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>,
  };
- return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" {...props}>{paths[name]||paths.book}</svg>
+ return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false" {...props}>{paths[name]||paths.book}</svg>
 }

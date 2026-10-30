@@ -1,25 +1,60 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 import Icon from './icons';
+import Dialog from './components/Dialog';
+import ProfileForm from './components/ProfileForm';
+import AdvisingSlipModal from './components/AdvisingSlipModal';
 import {
-  courses,
-  terms,
+  DEGREE_PROGRAMS,
+  getProgramById,
+  DEFAULT_PROGRAM_ID,
+  DEFAULT_PROFILE,
+  type DegreeProgram,
   type Course,
   type StudentProfile,
-  type StudentStanding,
-  DEGREE_PROGRAMS,
-  ACADEMIC_YEARS,
-  DEFAULT_PROFILE,
-} from './courses';
+} from './curricula';
 import { evaluateMamdaniStress } from './fuzzyEngine';
 import { CourseGraphEngine } from './graphEngine';
 
-const nav = [
-  ['grid', 'Overview'],
-  ['calendar', 'My planner'],
-  ['book', 'Course catalog'],
-  ['graph', 'Prerequisite map'],
-  ['chart', 'My progress'],
-];
+const cn = (...values: ClassValue[]) => twMerge(clsx(values));
+const navigation = [
+  { icon: 'grid', label: 'Overview' },
+  { icon: 'calendar', label: 'My planner' },
+  { icon: 'book', label: 'Course catalog' },
+  { icon: 'graph', label: 'Prerequisite map' },
+  { icon: 'chart', label: 'My progress' },
+] as const;
+type Page = (typeof navigation)[number]['label'] | 'Settings';
+
+const blankProfile: StudentProfile = {
+  ...DEFAULT_PROFILE,
+  fullName: '',
+  studentId: '',
+  programId: DEFAULT_PROGRAM_ID,
+  standing: '1st Year',
+  startingTerm: 0,
+  confidence: 7,
+  isConfigured: false,
+};
+
+function sanitizeProfile(raw: any): StudentProfile {
+  if (!raw || typeof raw !== 'object') return blankProfile;
+  return {
+    ...blankProfile,
+    ...raw,
+    fullName: typeof raw.fullName === 'string' ? raw.fullName : (typeof raw.name === 'string' ? raw.name : ''),
+    studentId: typeof raw.studentId === 'string' ? raw.studentId : '',
+    programId: typeof raw.programId === 'string' && raw.programId ? raw.programId : DEFAULT_PROGRAM_ID,
+    academicYear: typeof raw.academicYear === 'string' && raw.academicYear ? raw.academicYear : 'AY 2025–2026',
+    standing: ['1st Year', '2nd Year', '3rd Year', '4th Year', 'Irregular'].includes(raw.standing)
+      ? raw.standing
+      : '1st Year',
+    startingTerm: typeof raw.startingTerm === 'number' ? raw.startingTerm : 0,
+    confidence: typeof raw.confidence === 'number' ? Math.max(1, Math.min(10, raw.confidence)) : 7,
+    isConfigured: Boolean(raw.isConfigured),
+  };
+}
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -30,602 +65,777 @@ function load<T>(key: string, fallback: T): T {
 }
 
 export default function App() {
-  const [page, setPage] = useState('Overview');
-  const [profile, setProfile] = useState<StudentProfile>(() =>
-    load('ca-profile', DEFAULT_PROFILE)
-  );
-  const [draftProfile, setDraftProfile] = useState<StudentProfile>(() =>
-    load('ca-profile', DEFAULT_PROFILE)
-  );
-
-  const [completed, setCompleted] = useState<string[]>(() =>
-    load('ca-completed', courses.filter(c => c.term < 4).map(c => c.code))
-  );
-  const [confidence, setConfidence] = useState(() => {
-    const saved = load<StudentProfile | null>('ca-profile', null);
-    return saved?.confidence ?? load('ca-confidence', 7);
-  });
+  const [page, setPage] = useState<Page>('Overview');
+  const [profile, setProfile] = useState<StudentProfile>(() => sanitizeProfile(load('ca-profile', blankProfile)));
+  const [completed, setCompleted] = useState<string[]>(() => load('ca-completed', []));
+  const [plan, setPlan] = useState<string[]>(() => load('ca-plan', []));
+  const [term, setTerm] = useState<number>(() => load('ca-term', load('ca-profile', blankProfile).startingTerm));
+  const [targetGoal, setTargetGoal] = useState<string>(() => load('ca-goal', ''));
+  const [demo, setDemo] = useState(() => load('ca-demo', false));
+  const [modal, setModal] = useState(() => (load('ca-profile', blankProfile).isConfigured ? '' : 'onboarding'));
   const [selected, setSelected] = useState<Course | null>(null);
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('All subjects');
-  const [term, setTerm] = useState(4);
+  const [category, setCategory] = useState('All categories');
+  const [status, setStatus] = useState('All courses');
+  const [catalogTerm, setCatalogTerm] = useState('all');
   const [notice, setNotice] = useState('');
-  const [modal, setModal] = useState<string>(() => {
-    const saved = load<StudentProfile | null>('ca-profile', null);
-    return saved && saved.isConfigured ? '' : 'onboarding';
-  });
-  const [plan, setPlan] = useState<string[]>(() =>
-    load('ca-plan', courses.filter(c => c.term === 4).map(c => c.code))
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [storageError, setStorageError] = useState(false);
+  const [draftConfidence, setDraftConfidence] = useState(profile.confidence);
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const pageTitle = useRef<HTMLHeadingElement>(null);
+  const previousPage = useRef<Page>(page);
+
+  // Dynamic active program & curriculum from student profile
+  const program: DegreeProgram = useMemo(
+    () => getProgramById(profile.programId || DEFAULT_PROGRAM_ID),
+    [profile.programId]
   );
-  const [targetGoal, setTargetGoal] = useState('MRB199');
+  const courses: Course[] = program.courses;
+  const terms: string[] = program.terms;
+  const goals: string[] = useMemo(() => program.milestones.map(m => m.code), [program]);
+  const categories = useMemo(() => ['All categories', ...new Set(courses.map(c => c.category))], [courses]);
 
-  const graphEngine = useMemo(() => new CourseGraphEngine(courses), []);
+  const thirdYearTerm = program.standingTerm['3rd Year'] ?? 4;
+  const standingCourses = courses.filter(c => c.term < thirdYearTerm);
+  const needsStanding = (c: Course) =>
+    ['MRB195', 'MRB198', 'ANS191', 'ANS194', 'AGM191', 'AGM194', 'MKT197', 'ELC101', 'ELC102'].includes(c.code);
 
-  const activeProgram = useMemo(() => {
-    return DEGREE_PROGRAMS.find(p => p.id === profile.programId) || DEGREE_PROGRAMS[0];
-  }, [profile.programId]);
+  const courseByCode = (code: string): Course =>
+    courses.find(c => c.code === code) ||
+    courses.find(c => c.code.toLowerCase() === code.toLowerCase()) ||
+    courses[0];
 
-  const activeAY = useMemo(() => {
-    return profile.academicYear || activeProgram.catalogAY || 'AY 2025–2026';
-  }, [profile.academicYear, activeProgram.catalogAY]);
+  const graph = useMemo(() => new CourseGraphEngine(courses), [courses]);
 
-  const initials = useMemo(() => {
-    const parts = (profile.fullName || 'Alex Santos').trim().split(/\s+/);
-    if (!parts.length || !parts[0]) return 'AS';
-    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }, [profile.fullName]);
-
-  const done = courses.filter(c => completed.includes(c.code));
-  const earned = done.reduce((s, c) => s + c.units, 0);
-  const total = courses.reduce((s, c) => s + c.units, 0);
-  const planned = courses.filter(c => plan.includes(c.code) && !completed.includes(c.code));
-  const units = planned.reduce((s, c) => s + c.units, 0);
-
-  const avgDifficulty = useMemo(() => {
-    if (!planned.length) return 6.2;
-    return planned.reduce((s, c) => s + c.difficulty, 0) / planned.length;
-  }, [planned]);
-
-  const fuzzyWorkload = useMemo(
-    () => evaluateMamdaniStress(units, confidence, avgDifficulty),
-    [units, confidence, avgDifficulty]
-  );
-  const stress = fuzzyWorkload.stressScore;
-
-  const eligible = (c: Course) =>
-    c.pre.every(p => completed.includes(p)) &&
-    (!['MRB198', 'MRB195'].includes(c.code) ||
-      courses.filter(x => x.term < 4).every(x => completed.includes(x.code)));
-
-  function toast(t: string) {
-    setNotice(t);
-    window.setTimeout(() => setNotice(''), 4000);
-  }
-
-  function toggle(c: Course) {
-    const next = completed.includes(c.code)
-      ? completed.filter(x => x !== c.code)
-      : [...completed, c.code];
-    setCompleted(next);
-    localStorage.setItem('ca-completed', JSON.stringify(next));
-  }
-
-  function savePlan(p: string[]) {
-    setPlan(p);
-    localStorage.setItem('ca-plan', JSON.stringify(p));
-  }
-
-  function generate() {
-    let p: string[] = [];
-    let u = 0;
-    const cap = fuzzyWorkload.recommendedCredits;
-    for (const c of courses.filter(c => !completed.includes(c.code) && eligible(c))) {
-      if (p.includes(c.code)) continue;
-      const group = [
-        c,
-        ...(c.co
-          ? courses.filter(x => x.code === c.co && !completed.includes(x.code) && !p.includes(x.code))
-          : []),
-      ];
-      const n = group.reduce((s, x) => s + x.units, 0);
-      if (u + n <= cap) {
-        p.push(...group.map(x => x.code));
-        u += n;
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && sidebarOpen) {
+        setSidebarOpen(false);
       }
     }
-    savePlan(p);
-    setModal('');
-    setPage('My planner');
-    toast(`Semester plan created! · ${u} units added (Target Cap: ${cap} units), prerequisites verified.`);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen]);
+  useEffect(() => {
+    if (previousPage.current !== page) {
+      pageTitle.current?.focus();
+      window.scrollTo({ top: 0 });
+      previousPage.current = page;
+    }
+  }, [page]);
+
+  const done = courses.filter(c => completed.includes(c.code));
+  const earned = done.reduce((sum, c) => sum + c.units, 0);
+  const total = courses.reduce((sum, c) => sum + c.units, 0);
+  const progress = total > 0 ? Math.round((earned / total) * 100) : 0;
+  const planned = courses.filter(c => plan.includes(c.code) && !completed.includes(c.code));
+  const units = planned.reduce((sum, c) => sum + c.units, 0);
+  const averageDifficulty = planned.length
+    ? planned.reduce((sum, c) => sum + c.difficulty, 0) / planned.length
+    : 6.2;
+  const workload = evaluateMamdaniStress(units, profile.confidence, averageDifficulty);
+  const previewWorkload = evaluateMamdaniStress(units, draftConfidence, averageDifficulty);
+
+  const termLabel = terms[term] || terms[0] || 'Current Semester';
+  const firstName = (profile.fullName || '').trim().split(/\s+/)[0] || 'there';
+  const initials =
+    (profile.fullName || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(p => p[0])
+      .filter((_, i, a) => i === 0 || i === a.length - 1)
+      .join('')
+      .toUpperCase() || 'CA';
+
+  function missingPrerequisites(c: Course) {
+    return [
+      ...new Set([
+        ...c.pre,
+        ...(needsStanding(c) ? standingCourses.map(x => x.code) : []),
+      ]),
+    ].filter(code => !completed.includes(code));
   }
 
-  function saveStudentProfile(newProf: StudentProfile) {
-    const configured: StudentProfile = { ...newProf, isConfigured: true };
-    setProfile(configured);
-    setConfidence(configured.confidence);
-    localStorage.setItem('ca-profile', JSON.stringify(configured));
-    localStorage.setItem('ca-confidence', configured.confidence.toString());
+  const eligible = (c: Course) => missingPrerequisites(c).length === 0;
+  const available = courses.filter(c => !completed.includes(c.code) && eligible(c));
 
-    // Adjust starting term according to year standing
-    if (configured.standing === '1st Year') {
-      setTerm(0);
-    } else if (configured.standing === '2nd Year') {
-      setTerm(2);
-    } else if (configured.standing === '3rd Year') {
-      setTerm(4);
-    } else if (configured.standing === '4th Year') {
-      setTerm(6);
+  const planIssues = planned.flatMap(c => {
+    const missing = missingPrerequisites(c);
+    return [
+      ...(missing.length ? [`${c.code}: complete ${missing.join(', ')} first.`] : []),
+      ...(c.co && !completed.includes(c.co) && !plan.includes(c.co)
+        ? [`${c.code}: add companion course ${c.co}.`]
+        : []),
+    ];
+  });
+
+  const activeGoalCode = courses.some(c => c.code === targetGoal)
+    ? targetGoal
+    : program.milestones[0]?.code || courses[0]?.code || '';
+  const goalCourse = courseByCode(activeGoalCode);
+  const goalAnalysis = graph.backwardChainFromGoal(goalCourse.code, new Set(completed));
+  const goalRequirements = new Set(goalAnalysis.unfulfilledChain);
+
+  if ([goalCourse, ...goalAnalysis.unfulfilledChain.map(courseByCode)].some(needsStanding)) {
+    standingCourses.filter(c => !completed.includes(c.code)).forEach(c => goalRequirements.add(c.code));
+  }
+
+  const goalTierMap = new Map<number, Course[]>();
+  for (const code of goalRequirements) {
+    const tier = graph.getCourseTier(code);
+    goalTierMap.set(tier, [...(goalTierMap.get(tier) || []), courseByCode(code)]);
+  }
+  const goalTiers = [...goalTierMap.entries()].sort(([a], [b]) => a - b);
+
+  const filteredCourses = courses.filter(
+    c =>
+      `${c.code} ${c.title}`.toLowerCase().includes(query.trim().toLowerCase()) &&
+      (category === 'All categories' || c.category === category) &&
+      (catalogTerm === 'all' || c.term === Number(catalogTerm)) &&
+      (status === 'All courses' ||
+        (status === 'Completed'
+          ? completed.includes(c.code)
+          : status === 'Ready to take'
+          ? !completed.includes(c.code) && eligible(c)
+          : !completed.includes(c.code) && !eligible(c)))
+  );
+
+  function persist(key: string, value: unknown) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      setStorageError(true);
+    }
+  }
+
+  function notify(message: string) {
+    window.clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = window.setTimeout(() => setNotice(''), 6000);
+  }
+
+  function navigate(next: Page) {
+    setPage(next);
+    setSidebarOpen(false);
+  }
+
+  function savePlan(next: string[]) {
+    setPlan(next);
+    persist('ca-plan', next);
+  }
+
+  function saveTerm(next: number) {
+    setTerm(next);
+    persist('ca-term', next);
+  }
+
+  function saveGoal(next: string) {
+    setTargetGoal(next);
+    persist('ca-goal', next);
+  }
+
+  function toggleCompleted(c: Course) {
+    const next = completed.includes(c.code)
+      ? completed.filter(code => code !== c.code)
+      : [...completed, c.code];
+    setCompleted(next);
+    persist('ca-completed', next);
+    notify(
+      `${c.code} marked ${completed.includes(c.code) ? 'not completed' : 'completed'}. Progress updated.`
+    );
+  }
+
+  function saveProfile(
+    next: StudentProfile,
+    options?: { autoFillPrior: boolean; goalCode: string }
+  ) {
+    const isProgramChange = next.programId !== profile.programId;
+    const firstSetup = !profile.isConfigured || modal === 'new-profile' || modal === 'onboarding' || isProgramChange;
+    const nextProgram = getProgramById(next.programId);
+    const saved = { ...next, fullName: next.fullName.trim(), isConfigured: true };
+
+    setProfile(saved);
+    persist('ca-profile', saved);
+    persist('ca-confidence', saved.confidence);
+
+    const goalToSet = options?.goalCode || nextProgram.milestones[0]?.code || nextProgram.courses[0]?.code || '';
+    saveGoal(goalToSet);
+
+    if (firstSetup) {
+      if (options?.autoFillPrior && saved.startingTerm > 0) {
+        const priorCourses = nextProgram.courses
+          .filter(c => c.term < saved.startingTerm)
+          .map(c => c.code);
+        setCompleted(priorCourses);
+        persist('ca-completed', priorCourses);
+      } else {
+        setCompleted([]);
+        persist('ca-completed', []);
+      }
+      savePlan([]);
+      setDemo(false);
+      persist('ca-demo', false);
+      saveTerm(saved.startingTerm);
+      navigate('Overview');
     }
 
     setModal('');
-    toast(`Profile saved · Welcome, ${configured.fullName}!`);
+    notify(
+      firstSetup
+        ? `Welcome, ${saved.fullName}! ${nextProgram.code} curriculum loaded.`
+        : 'Your profile has been updated.'
+    );
+  }
+
+  function exploreDemo() {
+    const demoProgram = getProgramById(profile.programId || DEFAULT_PROGRAM_ID);
+    const startingTerm = demoProgram.standingTerm['3rd Year'] ?? 4;
+    const saved: StudentProfile = {
+      ...DEFAULT_PROFILE,
+      fullName: 'Alex Santos',
+      programId: demoProgram.id,
+      academicYear: demoProgram.catalogAY,
+      standing: '3rd Year',
+      startingTerm,
+      confidence: 7,
+      isConfigured: true,
+    };
+    setProfile(saved);
+    persist('ca-profile', saved);
+
+    const sampleCompleted = demoProgram.courses
+      .filter(c => c.term < startingTerm)
+      .map(c => c.code);
+    setCompleted(sampleCompleted);
+    persist('ca-completed', sampleCompleted);
+
+    const samplePlan = demoProgram.courses
+      .filter(c => c.term === startingTerm)
+      .slice(0, 4)
+      .map(c => c.code);
+    savePlan(samplePlan);
+    saveTerm(startingTerm);
+    saveGoal(demoProgram.milestones[0]?.code || demoProgram.courses[0]?.code || '');
+    setDemo(true);
+    persist('ca-demo', true);
+    setModal('');
+    notify(`Sample ${demoProgram.code} dashboard loaded. You can set up your own profile anytime.`);
+  }
+
+  function openPreferences(kind: string) {
+    setDraftConfidence(profile.confidence);
+    setModal(kind);
+  }
+
+  function proposedPlan() {
+    const result: string[] = [];
+    let count = 0;
+    const priorities = available.slice().sort(
+      (a, b) =>
+        Number(goalRequirements.has(b.code) || b.code === goalCourse.code) -
+          Number(goalRequirements.has(a.code) || a.code === goalCourse.code) ||
+        Number(b.term === term) - Number(a.term === term) ||
+        a.term - b.term
+    );
+    for (const c of priorities) {
+      if (result.includes(c.code)) continue;
+      const group = [
+        c,
+        ...(c.co && !completed.includes(c.co) && !result.includes(c.co) ? [courseByCode(c.co)] : []),
+      ];
+      if (!group.every(eligible)) continue;
+      const groupUnits = group.reduce((sum, x) => sum + x.units, 0);
+      if (count + groupUnits > previewWorkload.recommendedCredits) continue;
+      result.push(...group.map(x => x.code));
+      count += groupUnits;
+    }
+    return { codes: result, units: count };
+  }
+
+  const proposal = proposedPlan();
+
+  function generate() {
+    if (!proposal.codes.length) return;
+    const next = { ...profile, confidence: draftConfidence };
+    setProfile(next);
+    persist('ca-profile', next);
+    persist('ca-confidence', draftConfidence);
+    savePlan(proposal.codes);
+    setModal('');
+    navigate('My planner');
+    notify(`Plan created: ${proposal.codes.length} courses, ${proposal.units} units. Review it with your adviser.`);
+  }
+
+  function addCourse(c: Course) {
+    const pair = c.co ? courseByCode(c.co) : undefined;
+    if (!eligible(c) || (pair && !completed.includes(pair.code) && !eligible(pair))) return;
+    savePlan([...new Set([...plan, c.code, ...(pair && !completed.includes(pair.code) ? [pair.code] : [])])]);
+    notify(`${c.code}${pair && !completed.includes(pair.code) ? ` and ${pair.code}` : ''} added to your plan.`);
+    setSelected(null);
+  }
+
+  function removeCourse(c: Course) {
+    const removed = [c.code, ...(c.co ? [c.co] : [])];
+    savePlan(plan.filter(code => !removed.includes(code)));
+    notify(`${removed.filter(code => plan.includes(code)).join(' and ')} removed from your plan.`);
   }
 
   function exportPlan() {
-    const paceLabel = profile.confidence >= 7 ? 'Full Load' : profile.confidence >= 4 ? 'Balanced Load' : 'Light Load';
-    const blob = new Blob(
-      [
-        `================================================================================\n` +
-        `J.A.K.E.V. Edu — OFFICIAL ACADEMIC ADVISING DRAFT\n` +
-        `================================================================================\n` +
-        `Student Name:       ${profile.fullName}\n` +
-        `Student ID:         ${profile.studentId || 'N/A'}\n` +
-        `Academic Standing:  ${profile.standing}\n` +
-        `Degree Program:     ${activeProgram.name} (${activeProgram.campus})\n` +
-        `Curriculum Guide:   ${activeAY}\n` +
-        `Advising Semester:  ${terms[term]}\n` +
-        `Total Plan Units:   ${units} units (${planned.length} subjects)\n` +
-        `Semester Workload:  ${fuzzyWorkload.rating} (${stress}/100 stress score)\n` +
-        `Study Pace:         ${paceLabel} (Recommended Cap: ${fuzzyWorkload.recommendedCredits} units)\n` +
-        `================================================================================\n\n` +
-        `SCHEDULED SUBJECTS:\n` +
-        (planned.length
-          ? planned
-              .map(
-                c =>
-                  `• ${c.code.padEnd(10)} ${c.title.padEnd(52)} (${c.units} units) [Effort: ${c.difficulty.toFixed(1)}/10]`
-              )
-              .join('\n')
-          : '• (No subjects planned for this semester yet)') +
-        `\n\nPrerequisite Check: All prerequisite subjects and laboratory requirements verified.\n` +
-        `Adviser Consultation Note: Planning draft for academic advisement. Official enrollment requires adviser approval.\n`,
-      ],
-      { type: 'text/plain' }
-    );
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    const safeName = profile.fullName.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'student';
-    a.download = `${safeName}-academic-plan.txt`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const text = [
+      'J.A.K.E.V. Edu | Course Advisor',
+      'ACADEMIC ADVISING DRAFT',
+      `Student: ${profile.fullName}`,
+      `Student ID: ${profile.studentId || 'Not provided'}`,
+      `Program: ${program.name} | ${program.college} | ${program.campus}`,
+      `Curriculum: ${program.catalogAY}`,
+      `Semester: ${termLabel}`,
+      `Milestone Goal: ${goalCourse.code} - ${goalCourse.title}`,
+      `Total: ${planned.length} courses | ${units} units`,
+      `Workload estimate: ${workload.rating} (${workload.stressScore}/100)`,
+      `Confidence: ${profile.confidence}/10 | Suggested limit: ${workload.recommendedCredits} units`,
+      '',
+      ...planned.map(c => `${c.code} | ${c.title} | ${c.units} units${c.co ? ` | Companion: ${c.co}` : ''}`),
+      '',
+      'Curriculum checks:',
+      ...(planIssues.length ? planIssues : ['No missing prerequisites or companion courses in the current plan.']),
+      ...(units > workload.recommendedCredits
+        ? [`Plan exceeds suggested limit by ${units - workload.recommendedCredits} units.`]
+        : []),
+      '',
+      'Planning draft only. Confirm course availability, credited courses, and enrollment with your academic adviser.',
+    ].join('\n');
+
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${profile.fullName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'student'}-course-plan.txt`;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify('Your advising draft has been exported.');
   }
 
-  const courseRow = (c: Course, i: number) => (
-    <div
-      className="course-row"
+  function resetFilters() {
+    setQuery('');
+    setCategory('All categories');
+    setStatus('All courses');
+    setCatalogTerm('all');
+  }
+
+  function courseStatus(c: Course) {
+    return completed.includes(c.code)
+      ? 'Completed'
+      : eligible(c)
+      ? 'Ready to take'
+      : 'Needs prerequisites';
+  }
+
+  const renderCourse = (c: Course) => (
+    <button
       key={c.code}
+      className="course-row"
       onClick={() => setSelected(c)}
-      tabIndex={0}
-      role="button"
-      onKeyDown={e => e.key === 'Enter' && setSelected(c)}
+      aria-label={`${c.code}: ${c.title}, ${c.units} units, ${courseStatus(c)}`}
     >
-      <div className={`course-symbol tone-${i % 3}`}>
-        <Icon name={c.category === 'Marine Science' ? 'wave' : c.category === 'General Education' ? 'book' : 'leaf'} size={20} />
-      </div>
-      <div className="course-name">
+      <span className="course-symbol">
+        <Icon
+          name={
+            c.category.includes('Marine') || c.category.includes('Fisheries')
+              ? 'wave'
+              : c.category.includes('Science') || c.category.includes('Agri')
+              ? 'leaf'
+              : 'book'
+          }
+          size={19}
+        />
+      </span>
+      <span className="course-name">
         <strong>{c.title}</strong>
         <span>
           {c.code} <b>·</b> {c.category}
         </span>
+      </span>
+      <span className="course-units">
+        {c.units}
+        <small> units</small>
+      </span>
+      <span
+        className={cn(
+          'pill course-status',
+          completed.includes(c.code) ? 'green' : eligible(c) ? 'neutral' : 'amber'
+        )}
+      >
+        {courseStatus(c)}
+      </span>
+      <Icon name="chevron" size={16} className="course-arrow" />
+    </button>
+  );
+
+  const title =
+    page === 'Overview'
+      ? `Welcome back, ${firstName}.`
+      : page === 'My planner'
+      ? 'A semester that works for you.'
+      : page === 'Course catalog'
+      ? 'Find your next course.'
+      : page === 'Prerequisite map'
+      ? 'See the path ahead.'
+      : page === 'My progress'
+      ? 'Every course moves you forward.'
+      : 'Your profile & preferences.';
+
+  const descriptions: Record<Page, string> = {
+    Overview: `A little clarity for your next big step. Here’s where you stand in ${program.code}.`,
+    'My planner': 'Build a thoughtful course load, one subject at a time.',
+    'Course catalog': `Explore your ${program.name} curriculum, check requirements, and plan what comes next.`,
+    'Prerequisite map': 'Start with a goal. See the courses that will help you get there.',
+    'My progress': 'Keep your course history up to date for recommendations that fit you.',
+    Settings: 'Make this workspace yours. Your information stays in this browser.',
+  };
+
+  const workloadCard = (
+    <section className="panel workload" aria-labelledby="workload-title">
+      <div className="panel-heading">
+        <div>
+          <h2 id="workload-title">Your semester, balanced</h2>
+          <p>A little room to do your best work.</p>
+        </div>
+        <Icon name="leaf" size={21} />
       </div>
-      <span className="units">{c.units} units</span>
-      <span className={`pill ${completed.includes(c.code) ? 'green' : eligible(c) ? 'green' : 'amber'}`}>
-        {completed.includes(c.code) ? 'Completed' : eligible(c) ? 'Ready to take' : 'Prerequisites'}
-      </span>
-      <span className="circle-action-btn">
-        <Icon name="arrow" size={14} />
-      </span>
-    </div>
+      <div
+        className="gauge"
+        role="img"
+        aria-label={
+          planned.length
+            ? `Estimated workload ${workload.stressScore} out of 100, ${workload.rating}`
+            : 'Add courses to see your workload estimate'
+        }
+      >
+        <svg viewBox="0 0 240 140" aria-hidden="true">
+          <path d="M25 118a95 95 0 0 1 190 0" fill="none" stroke="#e1e9e5" strokeWidth="15" strokeLinecap="round" />
+          <path
+            d="M25 118a95 95 0 0 1 190 0"
+            fill="none"
+            stroke={workload.stressScore > 64 ? '#b77924' : '#348574'}
+            strokeWidth="15"
+            strokeLinecap="round"
+            strokeDasharray={`${planned.length ? workload.stressScore * 2.985 : 0} 299`}
+          />
+        </svg>
+        <div className="workload-score">
+          <strong>
+            {planned.length ? workload.stressScore : '—'}
+            <small>/100</small>
+          </strong>
+          <span>{planned.length ? workload.rating : 'Not estimated yet'}</span>
+        </div>
+      </div>
+      <div className="gauge-labels">
+        <span>Light</span>
+        <span>Moderate</span>
+        <span>Heavy</span>
+      </div>
+      <p className="workload-description">
+        {!planned.length
+          ? 'Add courses to your plan to see how your workload is shaping up.'
+          : workload.stressScore > 64
+          ? 'This plan may need more study time. Consider a lighter load or discuss it with your adviser.'
+          : 'Your plan leaves space to focus. Keep your other commitments in mind as you review it.'}
+      </p>
+      <dl className="workload-facts">
+        <div>
+          <dt>Planned units</dt>
+          <dd>
+            {units} <span>/ {workload.recommendedCredits} suggested</span>
+          </dd>
+        </div>
+        <div>
+          <dt>Study confidence</dt>
+          <dd>
+            {profile.confidence}
+            <span> / 10</span>
+          </dd>
+        </div>
+      </dl>
+      <button className="text-button" onClick={() => openPreferences('confidence')}>
+        Adjust my study pace <Icon name="arrow" size={16} />
+      </button>
+      <small className="form-hint">An estimate based on units, course difficulty, and your confidence.</small>
+    </section>
   );
 
   return (
     <div className="app">
-      {/* Floating Frosted Glass Sidebar */}
-      <aside className="sidebar">
-        <a
-          className="brand"
-          href="#"
-          onClick={e => {
-            e.preventDefault();
-            setPage('Overview');
-          }}
-        >
-          <span className="brand-icon">
-            <Icon name="book" size={22} />
-          </span>
-          <span>
-            J.A.K.E.V.<span className="brand-light"> Edu</span>
-            <small>YOUR PATH, CLEARER.</small>
-          </span>
-        </a>
-
-        <div className="workspace-label">WORKSPACE</div>
-
-        <nav>
-          {nav.map(([icon, label]) => (
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      {sidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside className={cn('sidebar', { 'sidebar-open': sidebarOpen })}>
+        <div className="sidebar-header">
+          <a
+            className="brand"
+            href="#overview"
+            onClick={e => {
+              e.preventDefault();
+              navigate('Overview');
+            }}
+          >
+            <span className="brand-icon">
+              <Icon name="book" size={23} />
+            </span>
+            <span className="brand-copy">
+              <strong>
+                J.A.K.E.V. <span>Edu</span>
+              </strong>
+              <small>Your academic compass</small>
+            </span>
+          </a>
+          <button
+            type="button"
+            className="sidebar-close-btn"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation menu"
+          >
+            <Icon name="close" size={20} />
+          </button>
+        </div>
+        <div className="workspace-label">YOUR WORKSPACE</div>
+        <nav className="main-nav" aria-label="Main navigation">
+          {navigation.map(item => (
             <button
-              key={label}
-              className={page === label ? 'active' : ''}
-              onClick={() => {
-                setPage(label);
-                setQuery('');
-              }}
+              key={item.label}
+              className={cn({ active: page === item.label })}
+              aria-current={page === item.label ? 'page' : undefined}
+              onClick={() => navigate(item.label)}
             >
-              <Icon name={icon} size={18} />
-              {label}
-              {label === 'My planner' && <span className="nav-dot" />}
+              <Icon name={item.icon} size={19} />
+              <span>{item.label}</span>
+              {item.label === 'My planner' && planned.length > 0 && (
+                <span className="nav-count">{planned.length}</span>
+              )}
             </button>
           ))}
         </nav>
-
         <div className="sidebar-bottom">
           <div className="advisor-tip">
-            <span className="mini-spark">
-              <Icon name="spark" size={18} />
-            </span>
+            <Icon name="compass" size={25} />
             <strong>
-              A little planning.
-              <br />A sea of possibilities.
+              A goal. A plan.
+              <br />A world of possibilities.
             </strong>
-            <p>Your next chapter starts with a plan that works for you.</p>
-            <button onClick={() => setModal('generate')}>
-              Build my plan <Icon name="arrow" size={15} />
+            <p>Your next chapter starts with one thoughtful step.</p>
+            <button className="text-button" onClick={() => navigate('Prerequisite map')}>
+              Explore my pathway <Icon name="arrow" size={15} />
             </button>
           </div>
-
           <button
-            className="settings-link"
-            onClick={() => {
-              setDraftProfile(profile);
-              setModal('profile');
-            }}
+            className={cn('settings-link', { active: page === 'Settings' })}
+            aria-current={page === 'Settings' ? 'page' : undefined}
+            onClick={() => navigate('Settings')}
           >
-            <Icon name="settings" size={17} />
-            Settings
+            <Icon name="settings" size={18} />
+            Profile & settings
           </button>
-
           <div className="offline">
-            <span />
-            All changes saved locally
             <Icon name="shield" size={14} />
+            <span>{storageError ? 'Changes not saved' : 'Saved on this device'}</span>
           </div>
         </div>
       </aside>
 
-      {/* Main Glass Shell */}
       <div className="main-shell">
-        <header>
-          <div className="breadcrumb">
-            Workspace <span>/</span> <strong>{page}</strong>
+        <header className="topbar">
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="hamburger-btn"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <Icon name="menu" size={20} />
+            </button>
+            <div className="breadcrumb">
+              Workspace <Icon name="chevron" size={13} />
+              <strong>{page}</strong>
+            </div>
           </div>
           <div className="header-right">
             <span className="academic-year">
               <span />
-              {activeAY}
+              {program.code} · {program.catalogAY}
             </span>
-            <button
-              className="icon-button notification"
-              aria-label="Notifications"
-              onClick={() => setModal('notifications')}
-            >
-              <Icon name="bell" size={18} />
-              <i />
+            <button className="icon-button" aria-label="How Course Advisor works" onClick={() => setModal('help')}>
+              <Icon name="info" size={20} />
             </button>
-            <div className="header-divider" />
-            <button
-              className="avatar"
-              onClick={() => {
-                setDraftProfile(profile);
-                setModal('profile');
-              }}
-              aria-label="Student profile"
-              title={`${profile.fullName} (${profile.standing})`}
-            >
+            <button className="avatar" aria-label="Edit student profile" onClick={() => setModal('profile')}>
               {initials}
             </button>
           </div>
         </header>
 
-        <main>
+        <main className="main-content" id="main-content">
+          {storageError && (
+            <div className="validation-note warning" role="alert">
+              Your browser could not save these changes. Keep this tab open and export your plan before leaving.
+            </div>
+          )}
+          {demo && (
+            <div className="demo-banner">
+              <span>
+                <Icon name="info" size={16} />
+                You’re exploring a sample {program.code} student profile.
+              </span>
+              <button className="text-button" onClick={() => setModal('new-profile')}>
+                Set up my profile <Icon name="arrow" size={14} />
+              </button>
+            </div>
+          )}
           <div className="page-heading">
             <div>
-              <div className="eyebrow">YOUR ACADEMIC COMPASS</div>
-              <h1>
-                {page === 'Overview'
-                  ? 'A clearer path to your future.'
-                  : page === 'My planner'
-                  ? 'Make room for what’s next.'
-                  : page === 'Course catalog'
-                  ? 'Explore your curriculum.'
-                  : page === 'Prerequisite map'
-                  ? 'See how it all connects.'
-                  : page === 'My progress'
-                  ? 'Every step counts.'
-                  : 'Make this plan yours.'}
+              <div className="eyebrow">{page === 'Overview' ? 'LET’S LOOK AHEAD' : page.toUpperCase()}</div>
+              <h1 ref={pageTitle} tabIndex={-1}>
+                {title}
               </h1>
-              <p>
-                {page === 'Overview'
-                  ? `Welcome back, ${profile.fullName.split(' ')[0] || 'Student'}. Let’s keep your ${activeProgram.name} journey on course.`
-                  : `${activeProgram.name} · ${activeProgram.campus} · ${activeAY}`}
-              </p>
+              <p>{descriptions[page]}</p>
             </div>
-            <button className="primary" onClick={() => setModal('generate')}>
-              <Icon name="spark" size={17} />
-              Generate my plan
-            </button>
+            <div className="page-actions">
+              {page === 'My planner' && (
+                <div className="page-actions-group">
+                  <button className="primary advising-slip-btn" disabled={!planned.length} onClick={() => setModal('advising-slip')}>
+                    <Icon name="spark" size={16} />
+                    <span>Official Advising Slip</span>
+                  </button>
+                  <button className="secondary" disabled={!planned.length} onClick={exportPlan} title="Download text draft">
+                    <Icon name="download" size={16} />
+                    <span>Export .txt</span>
+                  </button>
+                </div>
+              )}
+              {page !== 'Settings' && (
+                <button className="primary build-plan-btn" onClick={() => openPreferences('generate')}>
+                  <Icon name="spark" size={17} />
+                  <span>{planned.length ? 'Build a new plan' : 'Build my plan'}</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {page === 'Overview' && (
             <>
-              {/* Glass Hero Banner (Inspired by Travel & Payrot References) */}
               <section className="journey-banner">
-                <div className="banner-watermark">HORIZON</div>
                 <div className="banner-content">
                   <span className="banner-tag">
-                    <span />
-                    YOUR DEGREE, IN MOTION
+                    <Icon name="wave" size={15} />
+                    {program.name} · {program.college}
                   </span>
                   <h2>
                     Big ambitions.
-                    <em>One semester at a time.</em>
+                    <br />
+                    One semester at a time.
                   </h2>
                   <p>
-                    A thoughtful, data-driven planning system for your BS in Marine Science. Built around your
-                    progress, pace, and academic prerequisites.
+                    Your path to graduation is taking shape.
+                    <br />
+                    Let’s make your next step a confident one.
                   </p>
-
-                  {/* Floating Segmented Switcher Dock (From Image 2 Travel Search Bar) */}
-                  <div className="quick-dock" role="tablist" aria-label="Quick Navigation">
-                    {nav.map(([icon, label]) => (
-                      <button
-                        key={label}
-                        className={page === label ? 'active' : ''}
-                        onClick={() => {
-                          setPage(label);
-                          setQuery('');
-                        }}
-                      >
-                        <Icon name={icon} size={15} />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="banner-widget">
-                  <div className="banner-glass-card">
-                    <div className="widget-header">
-                      <div className="widget-icon-pill">
-                        <Icon name="book" size={18} />
-                      </div>
-                      <div className="widget-title-group">
-                        <span className="widget-kicker">DEGREE PATHWAY</span>
-                        <h4 className="widget-title">{activeProgram.name}</h4>
-                      </div>
-                      <span className="widget-campus-tag">{activeProgram.campus}</span>
-                    </div>
-
-                    <div className="widget-stats-grid">
-                      <div className="widget-stat-cell">
-                        <span className="widget-stat-val">{earned}</span>
-                        <span className="widget-stat-lbl">Units Earned</span>
-                      </div>
-                      <div className="widget-stat-divider" />
-                      <div className="widget-stat-cell">
-                        <span className="widget-stat-val">{total - earned}</span>
-                        <span className="widget-stat-lbl">Remaining</span>
-                      </div>
-                      <div className="widget-stat-divider" />
-                      <div className="widget-stat-cell">
-                        <span className="widget-stat-val">{Math.round((earned / total) * 100)}%</span>
-                        <span className="widget-stat-lbl">Progress</span>
-                      </div>
-                    </div>
-
-                    <div className="widget-progress-bar">
-                      <div
-                        className="widget-progress-fill"
-                        style={{ width: `${Math.round((earned / total) * 100)}%` }}
-                      />
-                    </div>
-
-                    <div className="widget-footer">
-                      <div className="widget-status-badge">
-                        <Icon name="check" size={13} />
-                        <span>{profile.standing} · {activeAY}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Glass Stat Feature Tiles (Inspired by Image 2 4-Pill Grid) */}
-              <section className="stats">
-                <Stat
-                  icon="cap"
-                  label="Degree progress"
-                  value={`${Math.round((earned / total) * 100)}%`}
-                  detail={`${earned} of ${total} curriculum units completed`}
-                >
-                  <div className="small-progress">
-                    <i style={{ width: `${(earned / total) * 100}%` }} />
-                  </div>
-                </Stat>
-
-                <Stat
-                  icon="check"
-                  label="Courses completed"
-                  value={`${done.length}`}
-                  detail={`of ${courses.length} courses in curriculum`}
-                >
-                  <span className="stat-caption">
-                    <span className="dot" /> A strong foundation for thesis
-                  </span>
-                </Stat>
-
-                <Stat
-                  icon="calendar"
-                  label="Current standing"
-                  value={profile.standing}
-                  detail={`Active Catalog: ${activeProgram.catalogAY}`}
-                >
-                  <span className="stat-caption">Academic Year Standing</span>
-                </Stat>
-
-                <Stat
-                  icon="spark"
-                  label="Recommended load"
-                  value={`${confidence >= 7 ? 18 : confidence >= 4 ? 15 : 12}`}
-                  suffix=" units"
-                  detail="Paced to keep your semester manageable"
-                >
-                  <span className="stat-caption">
-                    <span className="pill green">
-                      {confidence >= 7 ? 'Full Load' : confidence >= 4 ? 'Balanced' : 'Light'}
+                  <div className="banner-actions">
+                    <button
+                      className="primary"
+                      onClick={() => navigate(planned.length ? 'My planner' : 'My progress')}
+                    >
+                      {planned.length ? 'Continue to my planner' : 'Review my course history'}
+                      <Icon name="arrow" size={16} />
+                    </button>
+                    <span>
+                      {profile.standing} <b>·</b> {done.length} of {courses.length} courses completed
                     </span>
-                    <span>Level {confidence}/10</span>
-                  </span>
-                </Stat>
+                  </div>
+                </div>
+                <div className="banner-art" aria-hidden="true">
+                  <JourneyArt progress={progress} />
+                </div>
               </section>
 
-              {/* Overview Layout with Deep Navy Contrast Block */}
+              <section className="stats" aria-label="Academic summary">
+                <Stat icon="cap" label="Degree progress" value={`${progress}%`} detail={`${earned} of ${total} units completed`}>
+                  <div className="small-progress">
+                    <span style={{ width: `${progress}%` }} />
+                  </div>
+                </Stat>
+                <Stat icon="check" label="Courses completed" value={String(done.length)} suffix={` / ${courses.length}`} detail="Every subject is a step forward." />
+                <Stat icon="book" label="Ready to take" value={String(available.length)} suffix=" courses" detail="Your prerequisites are complete." />
+                <Stat icon="calendar" label="Planned this semester" value={String(units)} suffix=" units" detail={`${planned.length} courses · ${workload.recommendedCredits}-unit suggested limit`} />
+              </section>
+
               <div className="overview-columns">
                 <section className="panel recommended">
                   <div className="panel-heading">
                     <div>
                       <h2>
-                        Your next semester <span className="tiny-tag">RECOMMENDED</span>
+                        Your next semester <span className="pill neutral">Draft plan</span>
                       </h2>
-                      <p>Third year · First semester</p>
+                      <p>{termLabel}</p>
                     </div>
-                    <button className="text-button" onClick={() => setPage('My planner')}>
-                      View planner <Icon name="arrow" size={16} />
+                    <button className="text-button" onClick={() => navigate('My planner')}>
+                      View planner <Icon name="arrow" size={15} />
                     </button>
                   </div>
-
-                  <div className="table-label">
-                    <span>COURSE</span>
-                    <span>UNITS</span>
-                    <span>ELIGIBILITY</span>
-                    <span style={{ textAlign: 'center' }}>ACTION</span>
-                  </div>
-
-                  <div className="course-list">
-                    {planned.slice(0, 4).map(courseRow)}
-                  </div>
-
-                  <div className="panel-footer">
-                    <span>
-                      <Icon name="info" size={16} />
-                      Prerequisites and co-requisite rules automatically verified.
-                    </span>
-                    <button onClick={() => setPage('My planner')}>
-                      See all {planned.length} courses <Icon name="arrow" size={15} />
-                    </button>
-                  </div>
+                  {planned.length ? (
+                    <>
+                      <div className="table-label">
+                        <span>COURSE</span>
+                        <span>UNITS</span>
+                        <span>STATUS</span>
+                      </div>
+                      <div className="course-list">{planned.slice(0, 4).map(renderCourse)}</div>
+                      <div className="panel-footer">
+                        <span>
+                          <Icon name={planIssues.length ? 'info' : 'shield'} size={15} />
+                          {planIssues.length
+                            ? 'Some course requirements need a review.'
+                            : 'Prerequisites checked against your course history.'}
+                        </span>
+                        <button className="text-button" onClick={() => navigate('My planner')}>
+                          See all {planned.length} courses <Icon name="arrow" size={14} />
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyState
+                      icon="calendar"
+                      title="Your next chapter starts here"
+                      detail="Confirm your completed courses, then build a plan around your goal and study pace."
+                      action="Build my plan"
+                      onAction={() => openPreferences('generate')}
+                    />
+                  )}
                 </section>
-
-                {/* Deep Ocean Contrast Block (Payrot & Travel inspired) */}
-                <section className="panel workload deep-ocean-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Semester Workload</h2>
-                      <p>How manageable is your schedule?</p>
-                    </div>
-                    <span className="soft-icon">
-                      <Icon name="wave" size={20} />
-                    </span>
-                  </div>
-
-                  <div className="gauge">
-                    <svg viewBox="0 0 220 125">
-                      <path
-                        d="M25 105a85 85 0 0 1 170 0"
-                        fill="none"
-                        stroke="rgba(255,255,255,0.18)"
-                        strokeWidth="14"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d="M25 105a85 85 0 0 1 170 0"
-                        fill="none"
-                        stroke="url(#gauge-glass)"
-                        strokeWidth="14"
-                        strokeLinecap="round"
-                        strokeDasharray={`${stress * 2.67} 267`}
-                      />
-                      <defs>
-                        <linearGradient id="gauge-glass" x1="0" y1="0" x2="1" y2="0">
-                          <stop stopColor={stress > 80 ? '#F43F5E' : stress > 64 ? '#F59E0B' : '#38BDF8'} />
-                          <stop offset="1" stopColor={stress > 80 ? '#FB7185' : stress > 64 ? '#FBBF24' : '#00E5FF'} />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                    <div>
-                      <strong>
-                        {stress}
-                        <small>/100</small>
-                      </strong>
-                      <span>{fuzzyWorkload.rating}</span>
-                    </div>
-                  </div>
-
-                  <div className="gauge-labels">
-                    <span>Relaxed</span>
-                    <span>Balanced</span>
-                    <span>Demanding</span>
-                    <span>Heavy</span>
-                  </div>
-
-                  <p className="workload-description">
-                    {fuzzyWorkload.description}
-                  </p>
-
-                  <div className="mamdani-fuzzy-pills">
-                    <span className="fuzzy-pill">Avg Subject Effort: {avgDifficulty.toFixed(1)}/10</span>
-                    <span className="fuzzy-pill">Recommended Cap: {fuzzyWorkload.recommendedCredits} units</span>
-                  </div>
-
-                  <button className="full-text-button" onClick={() => setModal('confidence')}>
-                    Adjust study pace <Icon name="arrow" size={15} />
-                  </button>
-                </section>
+                {workloadCard}
               </div>
 
-              {/* Bottom Discovery Grid */}
               <div className="bottom-grid">
                 <section className="next-step">
-                  <div className="stat-icon-wrap">
-                    <Icon name="graph" size={22} />
+                  <div className="next-step-main">
+                    <span className="next-step-icon">
+                      <Icon name="graph" size={24} />
+                    </span>
+                    <div>
+                      <h3>Today’s courses. Tomorrow’s possibilities.</h3>
+                      <p>See how your foundation connects to {goalCourse.title.toLowerCase()}.</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3>See the bigger picture</h3>
-                    <p>Discover how today’s Marine Science foundation unlocks tomorrow’s thesis & practicum.</p>
-                  </div>
-                  <button className="text-button" onClick={() => setPage('Prerequisite map')}>
-                    Explore pathways <Icon name="arrow" size={16} />
+                  <button className="text-button" onClick={() => navigate('Prerequisite map')}>
+                    Explore my pathway <Icon name="arrow" size={16} />
                   </button>
                 </section>
-
-                <div className="source-note">
-                  <Icon name="shield" size={22} />
-                  <span>
-                    Your journey. Your data.
-                    <br />
-                    <small>Saved locally in browser. No telemetry required.</small>
-                  </span>
-                </div>
               </div>
             </>
           )}
@@ -633,47 +843,69 @@ export default function App() {
           {page === 'Course catalog' && (
             <section className="panel catalog">
               <div className="catalog-toolbar">
-                <div className="search">
-                  <Icon name="search" size={18} />
+                <label className="search-field">
+                  <Icon name="search" size={19} />
                   <input
-                    placeholder="Search course code or title…"
+                    type="search"
+                    aria-label="Search courses"
+                    placeholder="Search by course name or code…"
                     value={query}
                     onChange={e => setQuery(e.target.value)}
                   />
-                </div>
-                <select value={filter} onChange={e => setFilter(e.target.value)}>
-                  {['All subjects', 'Marine Science', 'Foundation', 'General Education'].map(x => (
+                </label>
+                <select aria-label="Filter by course category" value={category} onChange={e => setCategory(e.target.value)}>
+                  {categories.map(x => (
                     <option key={x}>{x}</option>
                   ))}
                 </select>
+                <select aria-label="Filter by curriculum semester" value={catalogTerm} onChange={e => setCatalogTerm(e.target.value)}>
+                  <option value="all">All semesters</option>
+                  {terms.map((t, i) => (
+                    <option key={t} value={i}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              <div className="catalog-info">
-                {
-                  courses.filter(
-                    c =>
-                      (filter === 'All subjects' || c.category === filter) &&
-                      `${c.code} ${c.title}`.toLowerCase().includes(query.toLowerCase())
-                  ).length
-                }{' '}
-                courses · Official 2025–2026 prospectus
+              <div className="filter-tabs" aria-label="Filter by course status">
+                {['All courses', 'Ready to take', 'Completed', 'Needs prerequisites'].map(x => (
+                  <button
+                    key={x}
+                    aria-pressed={status === x}
+                    className={cn({ active: status === x })}
+                    onClick={() => setStatus(x)}
+                  >
+                    {x}
+                  </button>
+                ))}
               </div>
-
-              <div className="course-list">
-                {courses
-                  .filter(
-                    c =>
-                      (filter === 'All subjects' || c.category === filter) &&
-                      `${c.code} ${c.title}`.toLowerCase().includes(query.toLowerCase())
-                  )
-                  .map(courseRow)}
-              </div>
-
-              <div className="curriculum-note">
-                <Icon name="info" size={18} />
+              <div className="catalog-info" role="status">
                 <span>
-                  Source: MSUN-CFMS-POS-002-2025-REV00. Physics codes and MB 195 / MB 196 references normalized to
-                  PHY101 and MRB195 / MRB196. Confirm enrollments with your adviser.
+                  {filteredCourses.length} courses <b>·</b> {program.name} ({program.catalogAY})
+                </span>
+                {(query || category !== 'All categories' || status !== 'All courses' || catalogTerm !== 'all') && (
+                  <button className="text-button" onClick={resetFilters}>
+                    Clear filters
+                  </button>
+                )}
+              </div>
+              <div className="course-list">
+                {filteredCourses.length ? (
+                  filteredCourses.map(renderCourse)
+                ) : (
+                  <EmptyState
+                    icon="search"
+                    title="No courses found"
+                    detail="Try a different course name, code, or filter."
+                    action="Clear filters"
+                    onAction={resetFilters}
+                  />
+                )}
+              </div>
+              <div className="panel-footer">
+                <span>
+                  <Icon name="info" size={16} />
+                  Official MSU at Naawan Prospectus ({program.college}).
                 </span>
               </div>
             </section>
@@ -682,93 +914,142 @@ export default function App() {
           {page === 'My planner' && (
             <>
               <div className="planner-toolbar">
-                <select
-                  value={term}
-                  onChange={e => {
-                    const t = +e.target.value;
-                    setTerm(t);
-                    savePlan(courses.filter(c => c.term === t && !completed.includes(c.code)).map(c => c.code));
+                <label className="semester-field">
+                  <span>Planning for</span>
+                  <select aria-label="Planning semester" value={term} onChange={e => saveTerm(Number(e.target.value))}>
+                    {terms.map((t, i) => (
+                      <option key={t} value={i}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span>
+                  {planned.length} courses <b>·</b> {units} total units
+                </span>
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    resetFilters();
+                    setStatus('Ready to take');
+                    navigate('Course catalog');
                   }}
                 >
-                  {terms.map((t, i) => (
-                    <option key={t} value={i}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-                <span>
-                  {planned.length} courses <b>·</b> {units} units
-                </span>
-                <button className="secondary" onClick={exportPlan}>
-                  <Icon name="download" size={17} />
-                  Export plan
+                  <Icon name="plus" size={16} />
+                  Add a course
                 </button>
               </div>
-
               <div className="planner-layout">
                 <section className="panel">
                   <div className="panel-heading">
                     <div>
                       <h2>Your semester plan</h2>
-                      <p>Review courses and verify prerequisites before academic advising.</p>
+                      <p>Selected courses stay in your draft when you change the planning semester.</p>
                     </div>
-                    <button className="text-button" onClick={() => setPage('Course catalog')}>
-                      <Icon name="plus" size={16} />
-                      Add course
-                    </button>
+                    <span className="pill neutral">{planned.length} courses</span>
                   </div>
-
-                  <div className="course-list">
-                    {planned.length ? (
-                      planned.map((c, i) => (
-                        <div className="planned-item" key={c.code}>
-                          {courseRow(c, i)}
-                          {(() => {
-                            const rat = graphEngine.generateRationale(c, new Set(completed));
-                            return (
-                              <div className={`plan-rationale urgency-${rat.urgency}`}>
-                                <div className="rationale-content">
-                                  <div className="rationale-meta">
-                                    <span className={`rationale-badge ${rat.urgency}`}>
-                                      {rat.urgency === 'high' ? '🔥 Critical Pathway' : '✓ Progression Step'}
-                                    </span>
-                                    <span className="diff-tag">Difficulty: {c.difficulty.toFixed(1)}/10</span>
-                                    {c.co && <span className="co-tag">Companion: {c.co}</span>}
-                                  </div>
-                                  <div className="rationale-body">
-                                    <strong>{rat.headline}</strong> — <span>{rat.detail}</span>
-                                  </div>
-                                </div>
-                                <button className="remove-plan-btn" onClick={() => savePlan(plan.filter(x => x !== c.code))}>
-                                  Remove
-                                </button>
-                              </div>
-                            );
-                          })()}
+                  {planIssues.length > 0 && (
+                    <div className="prereq-blocker-card" role="alert">
+                      <div className="blocker-header">
+                        <Icon name="alert" size={20} />
+                        <div>
+                          <strong>⚠️ Prerequisite Conflict Detected (Irregular Enrollment)</strong>
+                          <p>The following planned course(s) cannot be taken this semester because their required foundation courses are not yet completed:</p>
                         </div>
-                      ))
-                    ) : (
-                      <div className="empty">No courses planned. Generate a plan or add courses from the catalog.</div>
-                    )}
-                  </div>
+                      </div>
+                      <div className="blocker-list">
+                        {planned.filter(c => missingPrerequisites(c).length > 0).map(c => {
+                          const missing = missingPrerequisites(c);
+                          return (
+                            <div key={c.code} className="blocker-item">
+                              <div className="blocker-item-title">
+                                <strong>{c.code}</strong> — {c.title} ({c.units} units)
+                              </div>
+                              <div className="blocker-missing">
+                                <span>Required:</span>
+                                {missing.map(m => (
+                                  <span key={m} className="missing-badge">{m}</span>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {units > workload.recommendedCredits && (
+                    <div className="validation-note warning">
+                      You’re {units - workload.recommendedCredits} units above your suggested limit. Consider removing a
+                      course or adjusting your study pace.
+                    </div>
+                  )}
+                  {planned.length ? (
+                    <div className="course-list">
+                      {planned.map(c => {
+                        const rationale = graph.generateRationale(c, new Set(completed));
+                        return (
+                          <div className="planned-item" key={c.code}>
+                            {renderCourse(c)}
+                            <div className="plan-rationale">
+                              <div className="rationale-content">
+                                <span>
+                                  <Icon name="info" size={14} />
+                                  {eligible(c)
+                                    ? goalRequirements.has(c.code)
+                                      ? `A step toward ${goalCourse.title.toLowerCase()}`
+                                      : rationale.headline
+                                    : 'Prerequisites need attention'}
+                                </span>
+                                <p>
+                                  {eligible(c)
+                                    ? rationale.detail
+                                    : `Complete ${missingPrerequisites(c).join(', ')} before taking this course.`}
+                                  {c.co && ` Paired with companion ${c.co}.`}
+                                </p>
+                              </div>
+                              <button
+                                className="remove-plan-btn"
+                                aria-label={`Remove ${c.code}${c.co ? ` and companion ${c.co}` : ''} from plan`}
+                                onClick={() => removeCourse(c)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon="calendar"
+                      title="Make room for what’s next"
+                      detail="Build a suggested plan based on your completed courses and your academic goal."
+                      action="Build my plan"
+                      onAction={() => openPreferences('generate')}
+                    />
+                  )}
                 </section>
-
-                <section className="panel planner-summary">
-                  <div className="stat-icon-wrap" style={{ marginBottom: 16 }}>
-                    <Icon name="leaf" size={24} />
+                <div className="planner-summary">
+                  {workloadCard}
+                  <div className="panel adviser-note">
+                    <Icon name="info" size={20} />
+                    <h3>Ready for a conversation</h3>
+                    <p>
+                      Export your draft and review it with your adviser. They can confirm course offerings and enrollment
+                      requirements.
+                    </p>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <button className="primary" onClick={() => setModal('advising-slip')} disabled={!planned.length}>
+                        <Icon name="spark" size={16} />
+                        Official Advising Slip (Print/PDF)
+                      </button>
+                      <button className="secondary" onClick={exportPlan} disabled={!planned.length}>
+                        <Icon name="download" size={16} />
+                        Download .txt
+                      </button>
+                    </div>
                   </div>
-                  <h2>A pace that fits you</h2>
-                  <p>
-                    This plan includes <strong>{units} units</strong>. Your recommended credit cap is{' '}
-                    <strong>{fuzzyWorkload.recommendedCredits} units</strong> based on your chosen study pace.
-                  </p>
-                  <div className={`pill ${stress < 65 ? 'green' : 'amber'}`}>Semester Load: {fuzzyWorkload.rating}</div>
-                  <hr />
-                  <p>Course difficulty and workload balance are calculated from lecture hours, laboratory requirements, and prerequisite depth.</p>
-                  <button className="secondary" onClick={() => setModal('confidence')}>
-                    Adjust study pace
-                  </button>
-                </section>
+                </div>
               </div>
             </>
           )}
@@ -777,683 +1058,619 @@ export default function App() {
             <section className="panel map-panel">
               <div className="panel-heading">
                 <div>
-                  <h2>Graduation Roadmap & Prerequisite Guide</h2>
-                  <p>See the exact subjects you need to finish step-by-step to reach your senior milestones, thesis, and practicum.</p>
+                  <h2>Where would you like to go?</h2>
+                  <p>Choose a milestone to see the prerequisites that lead to it.</p>
                 </div>
-                <span className="pill green">Degree Milestones</span>
+                <Icon name="compass" size={24} />
               </div>
-
-              {/* Backward Chaining Interactive Goal Selector */}
-              <div className="goal-chain-selector">
-                <span className="selector-label">Choose a Goal to Plan For:</span>
-                <div className="goal-chips">
-                  {[
-                    { code: 'MRB199', label: 'Senior Thesis (MRB199)' },
-                    { code: 'MRB197', label: 'Practicum (MRB197)' },
-                    { code: 'MRB148', label: 'Coastal Mgmt (MRB148)' },
-                    { code: 'MRB145', label: 'Coral Reefs (MRB145)' },
-                    { code: 'OCN121', label: 'Oceanography (OCN121)' },
-                  ].map(g => (
-                    <button
-                      key={g.code}
-                      type="button"
-                      className={targetGoal === g.code ? 'active' : ''}
-                      onClick={() => setTargetGoal(g.code)}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {(() => {
-                const goalAnalysis = graphEngine.backwardChainFromGoal(targetGoal, new Set(completed));
-                const targetCourse = courses.find(c => c.code === targetGoal);
-                return (
-                  <div className="goal-chain-result">
-                    <div className="goal-status-strip">
-                      <div className="goal-metric">
-                        <span className="metric-label">Target Milestone</span>
-                        <strong>{targetGoal} — {targetCourse?.title}</strong>
-                      </div>
-                      <div className="goal-metric">
-                        <span className="metric-label">Prerequisites Status</span>
-                        <strong className={goalAnalysis.unfulfilledChain.length === 0 ? 'text-green' : 'text-amber'}>
-                          {goalAnalysis.unfulfilledChain.length === 0
-                            ? '✓ Ready to Enroll!'
-                            : `${goalAnalysis.unfulfilledChain.length} Subject(s) Needed First`}
-                        </strong>
-                      </div>
-                      <div className="goal-metric">
-                        <span className="metric-label">Already Completed</span>
-                        <strong>{goalAnalysis.terminalSatisfied.length} Foundational Subject(s)</strong>
-                      </div>
-                    </div>
-
-                    {goalAnalysis.unfulfilledChain.length > 0 ? (
-                      <div className="unfulfilled-tiers-grid">
-                        {goalAnalysis.depthTiers.map(({ tier, courses: tierCourses }) => (
-                          <div key={tier} className="unfulfilled-tier-card">
-                            <div className="tier-header">
-                              <span className="tier-badge">Step {tier + 1}</span>
-                              <span className="tier-count">{tierCourses.length} subject(s) to pass first</span>
-                            </div>
-                            <div className="tier-courses-list">
-                              {tierCourses.map(c => (
-                                <div
-                                  key={c.code}
-                                  className="tier-course-item"
-                                  onClick={() => setSelected(c)}
-                                  role="button"
-                                  tabIndex={0}
-                                >
-                                  <div className="tier-course-main">
-                                    <strong>{c.code}</strong>
-                                    <span>{c.title}</span>
-                                  </div>
-                                  <span className="tier-course-units">{c.units}u</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="goal-unlocked-banner">
-                        <Icon name="check" size={20} />
-                        <div>
-                          <strong>You've cleared all prerequisites!</strong>
-                          <p>You have completed all prerequisite subjects for {targetGoal}. You are officially eligible to enroll in this subject!</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              <div className="map-legend" style={{ marginTop: 28 }}>
-                <span>
-                  <i className="done-dot" />
-                  Completed
-                </span>
-                <span>
-                  <i />
-                  Upcoming
-                </span>
-              </div>
-
-              <div className="graph-flow">
-                <div className="graph-tier">
-                  {['BIO117', 'STT034'].map(code => (
-                    <GraphNode
-                      key={code}
-                      code={code}
-                      done={completed.includes(code)}
-                      onClick={() => setSelected(courses.find(c => c.code === code)!)}
-                    />
-                  ))}
-                </div>
-                <div className="graph-connect">→</div>
-                <div className="graph-tier">
-                  {['MRB131', 'MRB132'].map(code => (
-                    <GraphNode
-                      key={code}
-                      code={code}
-                      done={completed.includes(code)}
-                      onClick={() => setSelected(courses.find(c => c.code === code)!)}
-                    />
-                  ))}
-                </div>
-                <div className="graph-connect">→</div>
-                <div className="graph-tier">
-                  <GraphNode
-                    code="MRB134"
-                    done={completed.includes('MRB134')}
-                    onClick={() => setSelected(courses.find(c => c.code === code)!)}
-                  />
-                </div>
-                <div className="graph-connect">→</div>
-                <div className="graph-tier">
-                  {['MRB145', 'MRB148'].map(code => (
-                    <GraphNode
-                      key={code}
-                      code={code}
-                      done={completed.includes(code)}
-                      onClick={() => setSelected(courses.find(c => c.code === code)!)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="curriculum-note">
-                <Icon name="info" size={18} />
-                <span>
-                  MRB132 requires BIO117. MRB134 requires STT034, MRB131 and MRB132. MRB131 has no prerequisite.
-                  Click any course card to inspect requirements.
-                </span>
-              </div>
-
-              <div className="panel-heading" style={{ borderTop: '1px solid rgba(226,232,240,0.7)' }}>
-                <div>
-                  <h2>Research & Thesis Pathway</h2>
-                  <p>STT034 → MRB195 → MRB196 → MRB199</p>
-                </div>
-              </div>
-
-              <div className="research-flow">
-                {['STT034', 'MRB195', 'MRB196', 'MRB199'].map(code => (
-                  <GraphNode
+              <div className="goal-chips">
+                {goals.map(code => (
+                  <button
                     key={code}
-                    code={code}
-                    done={completed.includes(code)}
-                    onClick={() => setSelected(courses.find(c => c.code === code)!)}
-                  />
+                    aria-pressed={activeGoalCode === code}
+                    className={cn({ active: activeGoalCode === code })}
+                    onClick={() => saveGoal(code)}
+                  >
+                    {courseByCode(code).title}
+                  </button>
                 ))}
+              </div>
+              <div className="pathway-summary">
+                <div>
+                  <span>YOUR MILESTONE</span>
+                  <strong>{goalCourse.title}</strong>
+                  <small>
+                    {goalCourse.code} · {goalCourse.units} units
+                  </small>
+                </div>
+                <div>
+                  <span>BEFORE YOU GET THERE</span>
+                  <strong>
+                    {completed.includes(goalCourse.code)
+                      ? 'Milestone completed'
+                      : goalRequirements.size
+                      ? `${goalRequirements.size} courses remaining`
+                      : 'Prerequisites complete'}
+                  </strong>
+                  <small>Based on the course history you’ve recorded</small>
+                </div>
+              </div>
+              {completed.includes(goalCourse.code) ? (
+                <div className="validation-note">
+                  <Icon name="check" size={20} />
+                  You’ve marked this milestone as completed. Choose another goal to explore your next steps.
+                </div>
+              ) : (
+                <>
+                  <div className="map-legend">
+                    <span>
+                      <i />
+                      Prerequisite course
+                    </span>
+                    <span>
+                      <i className="done" />
+                      Ready to take
+                    </span>
+                    <span>Open any course to see its requirements</span>
+                  </div>
+                  <div className="pathway-grid">
+                    {goalTiers.map(([tier, list], index) => (
+                      <section className="pathway-tier" key={tier}>
+                        <div className="tier-header">
+                          <span>Step {index + 1}</span>
+                          <small>
+                            {list.length} {list.length === 1 ? 'course' : 'courses'}
+                          </small>
+                        </div>
+                        {list.map(c => (
+                          <button
+                            className={cn('pathway-course', { ready: eligible(c) })}
+                            key={c.code}
+                            onClick={() => setSelected(c)}
+                          >
+                            <span>
+                              {c.code}
+                              <Icon name={eligible(c) ? 'check' : 'chevron'} size={15} />
+                            </span>
+                            <strong>{c.title}</strong>
+                            <small>
+                              {c.units} units · {eligible(c) ? 'Ready to take' : 'Prerequisites first'}
+                            </small>
+                          </button>
+                        ))}
+                      </section>
+                    ))}
+                    <section className="pathway-tier goal-tier">
+                      <div className="tier-header">
+                        <span>Your milestone</span>
+                        <Icon name="cap" size={17} />
+                      </div>
+                      <button className="pathway-course target" onClick={() => setSelected(goalCourse)}>
+                        <span>
+                          {goalCourse.code}
+                          <Icon name="star" size={16} />
+                        </span>
+                        <strong>{goalCourse.title}</strong>
+                        <small>
+                          {goalCourse.units} units · {eligible(goalCourse) ? 'Ready to take' : 'Your destination'}
+                        </small>
+                      </button>
+                      {!goalRequirements.size && (
+                        <p className="form-hint">
+                          No outstanding prerequisites in the curriculum. Check availability with your adviser.
+                        </p>
+                      )}
+                    </section>
+                  </div>
+                </>
+              )}
+              <div className="panel-footer">
+                <span>
+                  <Icon name="info" size={16} />
+                  Prerequisite sequence evaluated using Backward Chaining over {program.name}.
+                </span>
+                <button className="text-button" onClick={() => openPreferences('generate')}>
+                  Plan toward this goal <Icon name="arrow" size={15} />
+                </button>
               </div>
             </section>
           )}
 
           {page === 'My progress' && (
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Academic Milestones</h2>
-                  <p>
-                    {done.length} courses complete · {earned} curriculum units earned
-                  </p>
+            <>
+              <div className="progress-overview panel">
+                <div className="progress-ring">
+                  <strong>{progress}%</strong>
+                  <span>complete</span>
                 </div>
-                <span className="pill green">Sample profile · Editable</span>
-              </div>
-
-              {terms.map((t, i) => {
-                const list = courses.filter(c => c.term === i);
-                const n = list.filter(c => completed.includes(c.code)).length;
-                return (
-                  <div className="progress-term" key={t}>
-                    <div>
-                      <strong>{t}</strong>
-                      <span>
-                        {n} of {list.length} courses complete
-                      </span>
-                    </div>
-                    <div className="small-progress">
-                      <i style={{ width: `${(n / list.length) * 100}%` }} />
-                    </div>
-                    <button
-                      className="text-button"
-                      onClick={() => {
-                        setPage('Course catalog');
-                        setQuery('');
-                      }}
-                    >
-                      Review courses <Icon name="arrow" size={15} />
-                    </button>
+                <div>
+                  <h2>Your journey so far</h2>
+                  <p>
+                    <strong>{done.length} courses</strong> completed · <strong>{earned} units</strong> earned ·{' '}
+                    {total - earned} units to go
+                  </p>
+                  <div className="small-progress">
+                    <span style={{ width: `${progress}%` }} />
                   </div>
-                );
-              })}
-            </section>
+                  <small className="form-hint">
+                    Mark only courses you have passed or received credit for. Your plan updates as your history changes.
+                  </small>
+                </div>
+                <button className="primary" onClick={() => openPreferences('generate')}>
+                  Plan my next step <Icon name="arrow" size={16} />
+                </button>
+              </div>
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Your course history</h2>
+                    <p>Open a semester to update your completed courses.</p>
+                  </div>
+                  <span className="pill neutral">{demo ? 'Sample history' : 'Self-reported history'}</span>
+                </div>
+                {terms.map((t, index) => {
+                  const list = courses.filter(c => c.term === index);
+                  const count = list.filter(c => completed.includes(c.code)).length;
+                  return (
+                    <details className="progress-term" key={t}>
+                      <summary>
+                        <span className="term-number">{String(index + 1).padStart(2, '0')}</span>
+                        <span className="progress-term-heading">
+                          <strong>{t}</strong>
+                          <small>
+                            {count} of {list.length} courses completed
+                          </small>
+                        </span>
+                        <span className="small-progress">
+                          <span style={{ width: `${list.length ? (count / list.length) * 100 : 0}%` }} />
+                        </span>
+                        <span className={cn('pill', count === list.length ? 'green' : 'neutral')}>
+                          {count === list.length ? 'Complete' : `${count}/${list.length}`}
+                        </span>
+                        <Icon name="chevron" size={18} />
+                      </summary>
+                      <div className="progress-course-list">
+                        {list.map(c => (
+                          <div className="progress-course" key={c.code}>
+                            <label className="completion-check">
+                              <input
+                                type="checkbox"
+                                checked={completed.includes(c.code)}
+                                onChange={() => toggleCompleted(c)}
+                              />
+                              <span>
+                                <strong>{c.code}</strong> {c.title}
+                              </span>
+                              <small>{c.units} units</small>
+                            </label>
+                            <button
+                              className="icon-button"
+                              aria-label={`View requirements for ${c.code}`}
+                              onClick={() => setSelected(c)}
+                            >
+                              <Icon name="info" size={17} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  );
+                })}
+              </section>
+            </>
           )}
 
           {page === 'Settings' && (
-            <section className="panel settings-panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>Student Profile & Preferences</h2>
-                  <p>All your notes and progress are saved right here on your browser. It works 100% offline, and you never need to remember a password.</p>
+            <div className="settings-grid">
+              <section className="panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>Student profile</h2>
+                    <p>The starting point for your academic plan.</p>
+                  </div>
+                  <button className="text-button" onClick={() => setModal('profile')}>
+                    Edit profile & degree <Icon name="arrow" size={15} />
+                  </button>
                 </div>
-                <button
-                  className="primary"
-                  onClick={() => {
-                    setDraftProfile(profile);
-                    setModal('profile');
-                  }}
-                >
-                  <Icon name="spark" size={16} /> Edit Profile
-                </button>
-              </div>
-
-              <div className="settings-profile-card">
-                <div className="profile-card-header">
-                  <div className="profile-avatar-large">{initials}</div>
-                  <div className="profile-card-titles">
-                    <h3>{profile.fullName}</h3>
-                    <div className="profile-card-tags">
-                      <span className="profile-id-tag">ID: {profile.studentId || 'N/A'}</span>
-                      <span className="profile-standing-badge">{profile.standing} Standing</span>
-                    </div>
+                <div className="profile-summary">
+                  <span className="profile-avatar">{initials}</span>
+                  <div>
+                    <h3>{profile.fullName || 'Your student profile'}</h3>
+                    <p>
+                      {profile.studentId || 'No student ID added'} · {profile.standing}
+                    </p>
+                    {demo && <span className="pill amber">Sample profile</span>}
                   </div>
                 </div>
-
-                <div className="profile-meta-grid">
-                  <div className="profile-meta-item">
-                    <span className="meta-label">Enrolled Program</span>
-                    <strong>{activeProgram.name}</strong>
-                    <small>{activeProgram.campus}</small>
+                <dl className="profile-details">
+                  <div>
+                    <dt>Degree program</dt>
+                    <dd>{program.name}</dd>
                   </div>
-                  <div className="profile-meta-item">
-                    <span className="meta-label">Curriculum Guide</span>
-                    <strong>{activeAY}</strong>
-                    <small>{activeProgram.totalUnits} Total Units</small>
+                  <div>
+                    <dt>College</dt>
+                    <dd>{program.college}</dd>
                   </div>
-                  <div className="profile-meta-item">
-                    <span className="meta-label">Preferred Study Pace</span>
-                    <strong>Level {confidence}/10 · {confidence >= 7 ? 'Full Load' : confidence >= 4 ? 'Balanced Pace' : 'Light Pace'}</strong>
-                    <small>Recommended Cap: {fuzzyWorkload.recommendedCredits} units</small>
+                  <div>
+                    <dt>Campus</dt>
+                    <dd>{program.campus}</dd>
                   </div>
-                </div>
-              </div>
-
-              <div className="settings-actions-row">
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    setDraftProfile(profile);
-                    setModal('profile');
-                  }}
-                >
-                  Edit My Profile & Pace
+                  <div>
+                    <dt>Curriculum version</dt>
+                    <dd>{program.catalogAY}</dd>
+                  </div>
+                  <div>
+                    <dt>Total program units</dt>
+                    <dd>{program.totalUnits} Units ({courses.length} Courses)</dd>
+                  </div>
+                  <div>
+                    <dt>Study confidence pace</dt>
+                    <dd>{profile.confidence} / 10</dd>
+                  </div>
+                </dl>
+                {demo && (
+                  <div className="form-actions">
+                    <button className="primary" onClick={() => setModal('new-profile')}>
+                      Set up my own profile
+                    </button>
+                  </div>
+                )}
+              </section>
+              <section className="panel settings-data">
+                <Icon name="shield" size={25} />
+                <h2>Your data, on your device</h2>
+                <p>
+                  Your profile, course history, and current plan are saved in this browser. They don’t automatically sync
+                  to other devices.
+                </p>
+                <button className="secondary" disabled={!planned.length} onClick={exportPlan}>
+                  <Icon name="download" size={16} />
+                  Export my plan
                 </button>
-                <button className="secondary danger-btn" onClick={() => setModal('reset')}>
-                  Reset Sample Progress
+                <hr />
+                <h3>Start with a clean course history</h3>
+                <p>
+                  Clear completed courses and the current plan. Your profile and study preferences will stay saved.
+                </p>
+                <button className="text-button danger" onClick={() => setModal('reset')}>
+                  Clear course history & plan
                 </button>
-              </div>
-            </section>
+              </section>
+            </div>
           )}
 
-          <footer>
+          <footer className="footer">
             <span>
-              <Icon name="book" size={16} />
-              Made for your next horizon.
+              <Icon name="wave" size={17} />
+              Your path, a little clearer.
             </span>
             <span>
-              {activeProgram.name} <b>·</b> {activeAY} <b>·</b> {activeProgram.campus}
+              {program.name} <b>·</b> {program.college} <b>·</b> {program.campus}
+              <button className="text-button" onClick={() => setModal('help')}>
+                About Course Advisor
+              </button>
             </span>
           </footer>
         </main>
       </div>
 
-      {/* Floating Glass Toast Notification */}
       {notice && (
-        <div className="toast" role="status">
+        <div className="notice" role="status">
           <Icon name="check" size={18} />
-          {notice}
+          <span>{notice}</span>
+          <button className="icon-button" aria-label="Dismiss notification" onClick={() => setNotice('')}>
+            <Icon name="close" size={16} />
+          </button>
         </div>
       )}
 
-      {/* Floating Glass Modal Backdrop */}
-      {(modal || selected) && (
-        <div
-          className="modal-backdrop"
-          onClick={() => {
-            if (modal === 'onboarding' && !profile.isConfigured) {
-              return;
-            }
-            setModal('');
-            setSelected(null);
-          }}
-        >
-          <section
-            className={`modal ${modal === 'onboarding' || modal === 'profile' ? 'modal-profile' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-label={
-              selected?.title ||
-              (modal === 'onboarding'
-                ? 'Student Onboarding'
-                : modal === 'profile'
-                ? 'Student Profile'
-                : 'Plan preferences')
-            }
-            onClick={e => e.stopPropagation()}
-          >
-            {!(modal === 'onboarding' && !profile.isConfigured) && (
-              <button
-                className="modal-close icon-button"
-                aria-label="Close dialog"
-                onClick={() => {
-                  setModal('');
-                  setSelected(null);
-                }}
-              >
-                <Icon name="close" size={18} />
-              </button>
-            )}
-
-            {selected ? (
-              <>
-                <span className="eyebrow">
-                  {selected.code} · {selected.units} UNITS
-                </span>
-                <h2>{selected.title}</h2>
-                <p>
-                  {terms[selected.term]} · {selected.category}
-                </p>
-                <div className="detail-box">
-                  <strong>Prerequisites & Requirements</strong>
-                  <p>{selected.pre.length ? `Pass before enrolling: ${selected.pre.join(', ')}` : 'No prior subjects required — open to enroll!'}</p>
-                  {['MRB195', 'MRB198'].includes(selected.code) && <p>Requires Third-Year standing (completion of Year 1 and 2 courses).</p>}
-                  {selected.co && <p>Companion laboratory section: {selected.co} (take in the same semester)</p>}
-                </div>
-                <p>
-                  {completed.includes(selected.code)
-                    ? '✓ You have already marked this subject as completed.'
-                    : eligible(selected)
-                    ? '✓ You have completed all required prerequisites. This subject is ready for your plan!'
-                    : '⚠️ Complete the required prerequisite subjects before enrolling in this course.'}
-                </p>
-                <button
-                  className="primary wide"
-                  onClick={() => {
-                    toggle(selected);
-                    toast(completed.includes(selected.code) ? 'Subject marked incomplete' : 'Subject marked completed');
-                  }}
-                >
-                  <Icon name="check" size={17} />
-                  {completed.includes(selected.code) ? 'Mark as not completed' : 'Mark as completed'}
-                </button>
-                {!completed.includes(selected.code) && (
-                  <button
-                    className="secondary wide"
-                    onClick={() => {
-                      if (!eligible(selected)) {
-                        toast('Complete prerequisite subjects before adding this course');
-                        return;
-                      }
-                      savePlan([
-                        ...new Set([
-                          ...plan,
-                          selected.code,
-                          ...(selected.co && !completed.includes(selected.co) ? [selected.co] : []),
-                        ]),
-                      ]);
-                      toast('Subject added to your semester plan');
-                      setSelected(null);
-                    }}
-                  >
-                    Add to semester plan
-                  </button>
+      {/* Course Detail Modal Dialog */}
+      <Dialog
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        title={selected?.title || 'Course details'}
+        description={selected ? `${selected.code} · ${selected.units} units · ${selected.category}` : undefined}
+      >
+        {selected && (
+          <>
+            <div className="course-detail-meta">
+              <span
+                className={cn(
+                  'pill',
+                  completed.includes(selected.code) || eligible(selected) ? 'green' : 'amber'
                 )}
-              </>
-            ) : modal === 'onboarding' || modal === 'profile' ? (
-              <div className="modal-profile-onboarding">
-                <div className="onboarding-header">
-                  <div className="onboarding-badge-icon">
-                    <Icon name="book" size={28} />
-                  </div>
-                  <span className="eyebrow">J.A.K.E.V. Edu · Student Advising</span>
-                  <h2>{modal === 'onboarding' ? 'Welcome! Let’s set up your academic journey.' : 'Update Your Student Profile'}</h2>
-                  <p>
-                    {modal === 'onboarding'
-                      ? 'Tell us a little about your degree and what year you’re in so we can suggest the best subjects for you this semester.'
-                      : 'Update your year level, preferred study load, or degree details whenever you need to.'}
-                  </p>
-                </div>
-
-                <form
-                  className="onboarding-form"
-                  onSubmit={e => {
-                    e.preventDefault();
-                    if (!draftProfile.fullName.trim()) {
-                      toast('Please enter your full name');
-                      return;
-                    }
-                    saveStudentProfile(draftProfile);
-                  }}
-                >
-                  <div className="form-row-2">
-                    <div className="form-group">
-                      <label htmlFor="student-name">What is your full name?</label>
-                      <input
-                        id="student-name"
-                        className="glass-input"
-                        type="text"
-                        placeholder="e.g. Alex Santos"
-                        value={draftProfile.fullName}
-                        onChange={e => setDraftProfile({ ...draftProfile, fullName: e.target.value })}
-                        required
-                        autoFocus
-                      />
-                    </div>
-
-                    <div className="form-group">
-                      <label htmlFor="student-id">Student ID Number (Optional)</label>
-                      <input
-                        id="student-id"
-                        className="glass-input"
-                        type="text"
-                        placeholder="e.g. 2023-0145"
-                        value={draftProfile.studentId || ''}
-                        onChange={e => setDraftProfile({ ...draftProfile, studentId: e.target.value })}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-row-2">
-                    <div className="form-group">
-                      <label htmlFor="student-program">What degree program are you taking?</label>
-                      <select
-                        id="student-program"
-                        className="glass-select"
-                        value={draftProfile.programId}
-                        onChange={e => setDraftProfile({ ...draftProfile, programId: e.target.value })}
-                      >
-                        {DEGREE_PROGRAMS.map(prog => (
-                          <option key={prog.id} value={prog.id}>
-                            {prog.name} · {prog.campus}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="form-group">
-                      <label htmlFor="student-ay">Curriculum Academic Year</label>
-                      <select
-                        id="student-ay"
-                        className="glass-select"
-                        value={draftProfile.academicYear || 'AY 2025–2026'}
-                        onChange={e => setDraftProfile({ ...draftProfile, academicYear: e.target.value })}
-                      >
-                        {ACADEMIC_YEARS.map(ay => (
-                          <option key={ay} value={ay}>
-                            {ay}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label>What year level are you currently in?</label>
-                    <div className="standing-chips" role="radiogroup" aria-label="Academic standing">
-                      {(['1st Year', '2nd Year', '3rd Year', '4th Year', 'Irregular / Transferee'] as StudentStanding[]).map(
-                        st => (
-                          <button
-                            key={st}
-                            type="button"
-                            role="radio"
-                            aria-checked={draftProfile.standing === st}
-                            className={`standing-chip ${draftProfile.standing === st ? 'active' : ''}`}
-                            onClick={() => {
-                              const startingTerm =
-                                st === '1st Year'
-                                  ? 0
-                                  : st === '2nd Year'
-                                  ? 2
-                                  : st === '3rd Year'
-                                  ? 4
-                                  : st === '4th Year'
-                                  ? 6
-                                  : draftProfile.startingTerm;
-                              setDraftProfile({ ...draftProfile, standing: st, startingTerm });
-                            }}
-                          >
-                            {st}
-                          </button>
-                        )
-                      )}
-                    </div>
-                    <span className="form-hint">
-                      {draftProfile.standing === '3rd Year'
-                        ? 'Great! 3rd-year standing unlocks research subjects (like MRB195 & MRB198). Planner defaults to Year 3.'
-                        : draftProfile.standing === '1st Year'
-                        ? 'Welcome to university! We’ll start with your foundational sciences and general education subjects.'
-                        : draftProfile.standing === '2nd Year'
-                        ? 'Advancing to intermediate biochemistry, ecology, and oceanography courses.'
-                        : draftProfile.standing === '4th Year'
-                        ? 'Almost at graduation! Focusing on thesis defense, seminar, and final practicum.'
-                        : 'Custom pathway with evaluation of credited subjects.'}
-                    </span>
-                  </div>
-
-                  <div className="form-group">
-                    <div className="confidence-header">
-                      <label htmlFor="student-confidence">How heavy a study load are you ready for?</label>
-                      <span className="confidence-pill-val">
-                        <strong>
-                          {draftProfile.confidence >= 7
-                            ? 'Full Load'
-                            : draftProfile.confidence >= 4
-                            ? 'Balanced Pace'
-                            : 'Light Pace'}
-                        </strong>{' '}
-                        · Level {draftProfile.confidence}/10
+              >
+                {courseStatus(selected)}
+              </span>
+              <span>{terms[selected.term]}</span>
+            </div>
+            <div className="detail-box">
+              <h3>Before you take this course</h3>
+              {selected.pre.length ? (
+                <ul className="requirements-list">
+                  {selected.pre.map(code => (
+                    <li className="requirement" key={code}>
+                      <Icon name={completed.includes(code) ? 'check' : 'clock'} size={16} />
+                      <span>
+                        <strong>{code}</strong> · {courseByCode(code).title}
+                        <small>{completed.includes(code) ? 'Completed' : 'Not yet completed'}</small>
                       </span>
-                    </div>
-                    <input
-                      id="student-confidence"
-                      className="confidence-range"
-                      type="range"
-                      min="1"
-                      max="10"
-                      value={draftProfile.confidence}
-                      onChange={e => setDraftProfile({ ...draftProfile, confidence: +e.target.value })}
-                    />
-                    <div className="range-labels">
-                      <span>Light Load (~12 units)</span>
-                      <span>Balanced Load (~15 units)</span>
-                      <span>Full Load (18 units)</span>
-                    </div>
-                    <span className="pace-description-hint">
-                      {draftProfile.confidence >= 7
-                        ? '🔥 Ready for a full schedule of major lectures and laboratory classes.'
-                        : draftProfile.confidence >= 4
-                        ? '⚖️ A steady, balanced schedule that keeps you on track without burning you out.'
-                        : '🌱 A lighter pace giving you more breathing room for personal commitments or difficult subjects.'}
-                    </span>
-                  </div>
-
-                  <div className="onboarding-actions">
-                    <button type="submit" className="primary wide">
-                      <Icon name="spark" size={18} />
-                      {modal === 'onboarding' ? 'Start Planning My Semester →' : 'Save Profile Changes'}
-                    </button>
-                    {modal === 'profile' && (
-                      <button
-                        type="button"
-                        className="secondary wide"
-                        onClick={() => {
-                          setDraftProfile(profile);
-                          setModal('');
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                </form>
-              </div>
-            ) : modal === 'notifications' ? (
-              <>
-                <h2>You’re all caught up!</h2>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No individual course prerequisites are listed.</p>
+              )}
+              {needsStanding(selected) && (
                 <p>
-                  Your curriculum is fully configured and all your academic progress is saved safely on this device. Visit
-                  your planner to inspect upcoming courses.
+                  <strong>Academic Standing required:</strong> complete all lower-level courses.{' '}
+                  {standingCourses.filter(c => !completed.includes(c.code)).length} remaining.
                 </p>
-                <button
-                  className="primary"
-                  onClick={() => {
-                    setPage('My planner');
-                    setModal('');
-                  }}
-                >
-                  Open my planner
-                </button>
-              </>
-            ) : modal === 'reset' ? (
-              <>
-                <h2>Start with a clean slate?</h2>
-                <p>This will remove sample completed courses and your saved semester plan from this browser.</p>
-                <button
-                  className="primary"
-                  onClick={() => {
-                    setCompleted([]);
-                    localStorage.setItem('ca-completed', '[]');
-                    savePlan([]);
-                    setModal('');
-                    toast('Sample progress cleared');
-                  }}
-                >
-                  Clear sample progress
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="modal-leaf">
-                  <Icon name="spark" size={26} />
-                </span>
-                <h2>{modal === 'generate' ? 'A semester plan built around your pace.' : 'Find your comfortable study pace.'}</h2>
+              )}
+              {selected.co && (
                 <p>
-                  How heavy of a study load are you ready to handle this semester? We’ll suggest a schedule that fits your energy and keeps stress low.
+                  <strong>Take together:</strong> {selected.co} · {courseByCode(selected.co).title}. Companion courses are
+                  added and removed together.
                 </p>
-                <div className="confidence-number">
-                  {confidence >= 7 ? 'Full Load' : confidence >= 4 ? 'Balanced Pace' : 'Light Pace'}
-                  <small> · Level {confidence}/10</small>
-                </div>
-                <input
-                  className="confidence-range"
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={confidence}
-                  onChange={e => {
-                    setConfidence(+e.target.value);
-                    localStorage.setItem('ca-confidence', e.target.value);
-                  }}
-                />
-                <div className="range-labels">
-                  <span>Light Load (~12 units)</span>
-                  <span>Balanced Load (~15 units)</span>
-                  <span>Full Load (18 units)</span>
-                </div>
-                <div className="detail-box">
-                  <strong>Recommended: {confidence >= 7 ? 18 : confidence >= 4 ? 15 : 12} units</strong>
-                  <p>
-                    {confidence >= 7
-                      ? 'Full schedule including standard major lectures and laboratory courses for your year.'
-                      : confidence >= 4
-                      ? 'A steady, balanced load of essential prerequisite subjects.'
-                      : 'A lighter schedule giving you extra time for difficult subjects and personal commitments.'}
-                  </p>
-                </div>
-                <button
-                  className="primary wide"
-                  onClick={
-                    modal === 'generate'
-                      ? generate
-                      : () => {
-                          setModal('');
-                          toast('Study pace updated');
-                        }
-                  }
-                >
-                  <Icon name="spark" size={17} />
-                  {modal === 'generate' ? 'Generate my semester plan' : 'Save my study pace'}
-                </button>
-              </>
+              )}
+            </div>
+            {!completed.includes(selected.code) && !eligible(selected) && (
+              <p className="field-error">Complete the missing requirements before adding this course to your plan.</p>
             )}
-          </section>
+            {selected.co && !completed.includes(selected.co) && !eligible(courseByCode(selected.co)) && (
+              <p className="field-error">The companion course {selected.co} also has unfinished prerequisites.</p>
+            )}
+            <div className="dialog-actions">
+              {!completed.includes(selected.code) && (
+                <button
+                  className="primary"
+                  disabled={
+                    plan.includes(selected.code) ||
+                    !eligible(selected) ||
+                    Boolean(selected.co && !completed.includes(selected.co) && !eligible(courseByCode(selected.co)))
+                  }
+                  onClick={() => addCourse(selected)}
+                >
+                  <Icon name={plan.includes(selected.code) ? 'check' : 'plus'} size={16} />
+                  {plan.includes(selected.code) ? 'Already in your plan' : 'Add to my plan'}
+                </button>
+              )}
+              <button className="secondary" onClick={() => toggleCompleted(selected)}>
+                <Icon name="check" size={16} />
+                {completed.includes(selected.code) ? 'Mark as not completed' : 'Mark as completed'}
+              </button>
+            </div>
+            <small className="form-hint">
+              Mark completion only for courses you have already passed or received credit for.
+            </small>
+          </>
+        )}
+      </Dialog>
+
+      {/* Profile & Onboarding Dialog (Mandatory First-Run Intake Gate) */}
+      <Dialog
+        open={['onboarding', 'profile', 'new-profile'].includes(modal)}
+        onClose={() => {
+          if (modal !== 'onboarding') setModal('');
+        }}
+        closable={modal !== 'onboarding'}
+        title={
+          modal === 'profile'
+            ? 'Edit Student Profile & Program'
+            : modal === 'new-profile'
+            ? 'Create New Student Profile'
+            : 'Welcome to J.A.K.E.V. Edu Course Advisor'
+        }
+        description={
+          modal === 'onboarding'
+            ? 'Select your degree program and academic standing. The system will load your exact prospectus, prerequisite tree, and workload stress gauge.'
+            : 'A few details help us keep your advising recommendations accurate and personalized.'
+        }
+        wide
+      >
+        {['onboarding', 'profile', 'new-profile'].includes(modal) && (
+          <ProfileForm
+            key={modal}
+            profile={modal === 'new-profile' ? blankProfile : profile}
+            onboarding={modal !== 'profile'}
+            initialGoal={activeGoalCode}
+            onSave={saveProfile}
+            onDemo={modal === 'onboarding' ? exploreDemo : undefined}
+          />
+        )}
+      </Dialog>
+
+      {/* Auto-Plan Generator Dialog */}
+      <Dialog
+        open={modal === 'generate' || modal === 'confidence'}
+        onClose={() => setModal('')}
+        title={modal === 'generate' ? 'Let’s build your next semester' : 'Find a pace that fits you'}
+        description="Your course history, academic goal, and confidence guide the recommendation."
+      >
+        <div className="dialog-stepper">
+          <span>
+            <Icon name="check" size={14} />
+            {done.length} courses completed
+          </span>
+          <span>
+            <Icon name="calendar" size={14} />
+            {termLabel}
+          </span>
         </div>
-      )}
+        {modal === 'generate' && (
+          <label className="field">
+            <span>Your academic goal</span>
+            <select value={activeGoalCode} onChange={e => saveGoal(e.target.value)}>
+              {program.milestones.map(m => (
+                <option key={m.code} value={m.code}>
+                  {m.title} ({m.code})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="field confidence-field">
+          <span>
+            How confident do you feel about your studies?
+            <strong>{draftConfidence} / 10</strong>
+          </span>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value={draftConfidence}
+            onChange={e => setDraftConfidence(Number(e.target.value))}
+          />
+          <span className="confidence-scale">
+            <small>I need a gentler pace</small>
+            <small>Ready for a challenge</small>
+          </span>
+        </label>
+        <div className="detail-box plan-preview">
+          <Icon name="leaf" size={24} />
+          <div>
+            <h3>
+              {modal === 'generate'
+                ? `${proposal.codes.length} courses · ${proposal.units} units`
+                : `${previewWorkload.recommendedCredits}-unit suggested limit`}
+            </h3>
+            <p>
+              {modal === 'generate'
+                ? `Up to ${previewWorkload.recommendedCredits} units, with prerequisites and companion courses checked.`
+                : 'Your workload estimate will update when you save your study pace.'}
+            </p>
+          </div>
+        </div>
+        {modal === 'generate' && (
+          <>
+            <p className="form-hint">
+              Courses toward your goal are prioritized. Your adviser can confirm which courses are offered in the
+              selected semester.
+            </p>
+            {!done.length && (
+              <div className="validation-note">
+                No completed courses recorded. If you’ve already passed courses,{' '}
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setModal('');
+                    navigate('My progress');
+                  }}
+                >
+                  update your course history
+                </button>{' '}
+                first.
+              </div>
+            )}
+            {planned.length > 0 && (
+              <p className="validation-note">Building a new plan will replace your current {planned.length}-course draft.</p>
+            )}
+            {!proposal.codes.length && (
+              <p className="field-error">No eligible courses remain for a new plan. Review your course history or choose another goal.</p>
+            )}
+          </>
+        )}
+        <div className="dialog-actions">
+          <button className="secondary" onClick={() => setModal('')}>
+            Cancel
+          </button>
+          <button
+            className="primary"
+            disabled={modal === 'generate' && !proposal.codes.length}
+            onClick={() => {
+              if (modal === 'generate') generate();
+              else {
+                const next = { ...profile, confidence: draftConfidence };
+                setProfile(next);
+                persist('ca-profile', next);
+                persist('ca-confidence', draftConfidence);
+                setModal('');
+                notify('Study pace updated. Your workload estimate has been refreshed.');
+              }
+            }}
+          >
+            <Icon name={modal === 'generate' ? 'spark' : 'check'} size={16} />
+            {modal === 'generate' ? 'Create my plan' : 'Save study pace'}
+          </button>
+        </div>
+      </Dialog>
+
+      {/* Reset Confirmation Dialog */}
+      <Dialog
+        open={modal === 'reset'}
+        onClose={() => setModal('')}
+        title="Clear your course history and plan?"
+        description="This removes all recorded course completions and your current semester draft from this browser. This cannot be undone."
+        alert
+      >
+        <div className="dialog-actions">
+          <button className="secondary" autoFocus onClick={() => setModal('')}>
+            Keep my progress
+          </button>
+          <button
+            className="primary danger"
+            onClick={() => {
+              setCompleted([]);
+              persist('ca-completed', []);
+              savePlan([]);
+              setDemo(false);
+              persist('ca-demo', false);
+              setModal('');
+              notify('Course history and plan cleared. Your profile is still saved.');
+            }}
+          >
+            Clear history & plan
+          </button>
+        </div>
+      </Dialog>
+
+      {/* About Dialog */}
+      <Dialog
+        open={modal === 'help'}
+        onClose={() => setModal('')}
+        title="A clearer path through your curriculum"
+        description="Course Advisor helps you prepare a thoughtful academic advising draft."
+      >
+        <ol className="help-steps">
+          <li>
+            <strong>Select your program.</strong> Choose from the 7 verified MSU at Naawan prospectuses.
+          </li>
+          <li>
+            <strong>Record your progress.</strong> Mark the courses you have already passed.
+          </li>
+          <li>
+            <strong>Choose a milestone.</strong> Explore the prerequisites for your thesis, practicum, or capstone.
+          </li>
+          <li>
+            <strong>Find your pace.</strong> Set your confidence and review your estimated workload stress.
+          </li>
+          <li>
+            <strong>Build and review.</strong> Adjust your plan and export it for advising consultations.
+          </li>
+        </ol>
+        <div className="detail-box">
+          <h3>{program.name}</h3>
+          <p>
+            Curriculum: {program.catalogAY} at {program.campus} ({program.college}). Total requirements: {program.totalUnits} units across {courses.length} courses.
+          </p>
+        </div>
+        <p className="form-hint">Your data is stored in this browser. Clearing browser data will remove it.</p>
+      </Dialog>
+      <AdvisingSlipModal
+        open={modal === 'advising-slip'}
+        onClose={() => setModal('')}
+        profile={profile}
+        program={program}
+        termLabel={termLabel}
+        goalCourse={goalCourse}
+        planned={planned}
+        units={units}
+        workload={workload}
+        planIssues={planIssues}
+        missingPrerequisites={missingPrerequisites}
+        onDownloadTxt={exportPlan}
+      />
     </div>
   );
 }
@@ -1462,45 +1679,100 @@ function Stat({
   icon,
   label,
   value,
-  detail,
   suffix,
+  detail,
   children,
 }: {
   icon: string;
   label: string;
   value: string;
-  detail: string;
   suffix?: string;
-  children: React.ReactNode;
+  detail: string;
+  children?: ReactNode;
 }) {
   return (
-    <div className="stat">
-      <div className="stat-header">
-        <span className="stat-title">{label}</span>
-        <div className="stat-icon-wrap">
-          <Icon name={icon} size={20} />
-        </div>
+    <article className="stat-card">
+      <div className="stat-top">
+        <span>{label}</span>
+        <span className="stat-icon">
+          <Icon name={icon} size={19} />
+        </span>
       </div>
       <div className="stat-value">
         {value}
         <small>{suffix}</small>
       </div>
-      <p>{detail}</p>
+      <p className="stat-detail">{detail}</p>
       {children}
+    </article>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  detail,
+  action,
+  onAction,
+}: {
+  icon: string;
+  title: string;
+  detail: string;
+  action: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="empty-state">
+      <span className="empty-icon">
+        <Icon name={icon} size={28} />
+      </span>
+      <h3>{title}</h3>
+      <p>{detail}</p>
+      <button className="secondary" onClick={onAction}>
+        {action}
+        <Icon name="arrow" size={16} />
+      </button>
     </div>
   );
 }
 
-function GraphNode({ code, done, onClick }: { code: string; done: boolean; onClick: () => void }) {
-  const c = courses.find(c => c.code === code)!;
+function JourneyArt({ progress }: { progress: number }) {
   return (
-    <button className={`graph-node ${done ? 'is-done' : ''}`} onClick={onClick}>
-      <span>
-        {code}
-        {done && <Icon name="check" size={15} />}
-      </span>
-      <strong>{c.title}</strong>
-      <small>{c.units} units</small>
-    </button>
+    <svg viewBox="0 0 360 230" fill="none">
+      <circle cx="218" cy="107" r="94" stroke="#cbddd4" />
+      <circle cx="218" cy="107" r="70" stroke="#cbddd4" strokeDasharray="3 7" />
+      <path
+        d="M16 186C61 186 45 82 110 82S150 186 211 167S247 54 320 54"
+        stroke="#88b1a1"
+        strokeWidth="2"
+        strokeDasharray="5 6"
+      />
+      <rect x="32" y="123" width="153" height="68" rx="12" fill="white" stroke="#d3e3da" />
+      <circle cx="58" cy="148" r="12" fill="#e4f0e9" />
+      <path d="m53 148 3 3 6-7" stroke="#176b5b" strokeWidth="2" strokeLinecap="round" />
+      <text x="80" y="151" fill="#3b6253" fontSize="11" fontFamily="inherit">
+        YOUR JOURNEY
+      </text>
+      <text x="50" y="175" fill="#1d4939" fontSize="13" fontWeight="600" fontFamily="inherit">
+        {progress}% closer to your goal
+      </text>
+      <rect x="193" y="34" width="142" height="72" rx="12" fill="#176b5b" />
+      <path
+        d="m210 56 14-6 14 6-14 6-14-6Zm5 4v7c6 4 12 4 18 0v-7m5-4v11"
+        stroke="white"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <text x="209" y="91" fill="white" fontSize="12" fontWeight="500" fontFamily="inherit">
+        Your next horizon
+      </text>
+      <circle cx="111" cy="82" r="7" fill="#176b5b" stroke="#eaf3ed" strokeWidth="5" />
+      <circle cx="211" cy="167" r="6" fill="#fafcf9" stroke="#88b1a1" strokeWidth="2" />
+      <path
+        d="M248 197c9-9 15 9 24 0s15 9 24 0m-48 9c9-9 15 9 24 0s15 9 24 0"
+        stroke="#8db5a3"
+        strokeWidth="1.5"
+      />
+    </svg>
   );
 }

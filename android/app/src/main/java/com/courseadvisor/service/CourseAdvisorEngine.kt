@@ -156,7 +156,7 @@ class CourseAdvisorEngine(val courses: List<Course> = CurriculumData.ALL_COURSES
 
     fun isEligible(course: Course, completedCodes: Set<String>): Boolean {
         val prerequisitesSatisfied = course.pre.all { completedCodes.contains(it) }
-        val thirdYearRequirement = if (course.code in listOf("MRB198", "MRB195")) {
+        val thirdYearRequirement = if (course.isCapstone || course.code in listOf("MRB198", "MRB195", "MKT198", "MKT199", "MKT197")) {
             courses.filter { it.term < 4 }.all { completedCodes.contains(it.code) }
         } else {
             true
@@ -166,7 +166,7 @@ class CourseAdvisorEngine(val courses: List<Course> = CurriculumData.ALL_COURSES
 
     fun getMissingPrerequisites(course: Course, completedCodes: Set<String>): List<String> {
         val missing = course.pre.filter { !completedCodes.contains(it) }.toMutableList()
-        if (course.code in listOf("MRB198", "MRB195")) {
+        if (course.isCapstone || course.code in listOf("MRB198", "MRB195", "MKT198", "MKT199", "MKT197")) {
             val incompleteUnderclass = courses.filter { it.term < 4 && !completedCodes.contains(it.code) }
             if (incompleteUnderclass.isNotEmpty()) {
                 missing.add("Third-year standing (${incompleteUnderclass.size} lower-term subjects incomplete)")

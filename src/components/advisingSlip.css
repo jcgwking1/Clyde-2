@@ -1,0 +1,574 @@
+/* Advising Slip Modal & Printable Styling */
+
+.slip-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.slip-modal-container {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  max-width: 900px;
+  width: 100%;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+}
+
+.slip-modal-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  background-color: #0f172a;
+  color: #f8fafc;
+  border-bottom: 1px solid #334155;
+}
+
+.slip-toolbar-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.925rem;
+  color: #38bdf8;
+}
+
+.slip-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.slip-toolbar-actions .primary {
+  background-color: #059669;
+  color: #ffffff;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+}
+
+.slip-toolbar-actions .primary:hover {
+  background-color: #047857;
+}
+
+.slip-toolbar-actions .secondary {
+  background-color: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.slip-toolbar-actions .secondary:hover {
+  background-color: #334155;
+}
+
+.slip-toolbar-actions .close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.slip-toolbar-actions .close-btn:hover {
+  color: #ffffff;
+  background-color: #334155;
+}
+
+/* Document Body */
+.advising-slip-document {
+  padding: 2.5rem 3rem;
+  background: #ffffff;
+  color: #0f172a;
+  overflow-y: auto;
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+  line-height: 1.45;
+}
+
+/* Header */
+.slip-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.slip-crest {
+  width: 68px;
+  height: 68px;
+  background: linear-gradient(135deg, #065f46, #047857);
+  color: #ffffff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.05em;
+  border: 3px solid #d1fae5;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.slip-header-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.slip-univ-name {
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #064e3b;
+}
+
+.slip-sub-office {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.slip-address {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+
+.slip-title {
+  margin: 0.25rem 0 0 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.02em;
+}
+
+.slip-curriculum-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  width: fit-content;
+  margin-top: 0.2rem;
+}
+
+.slip-divider-double {
+  border-top: 2px solid #064e3b;
+  border-bottom: 1px solid #064e3b;
+  height: 4px;
+  margin: 0.75rem 0 1.25rem 0;
+}
+
+/* Metadata Grid */
+.slip-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.65rem 1.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.slip-grid-item {
+  display: flex;
+  font-size: 0.825rem;
+  line-height: 1.35;
+}
+
+.slip-meta-label {
+  font-weight: 700;
+  color: #475569;
+  width: 145px;
+  flex-shrink: 0;
+}
+
+.slip-meta-value {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.slip-meta-value.slip-highlight {
+  color: #047857;
+  font-weight: 800;
+}
+
+/* Stress Card */
+.slip-stress-card {
+  border-radius: 8px;
+  padding: 0.85rem 1.25rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid #cbd5e1;
+}
+
+.slip-stress-card.balanced {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.slip-stress-card.overload {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.slip-stress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.65rem;
+}
+
+.slip-stress-title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #1e293b;
+}
+
+.slip-stress-badge {
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+}
+
+.badge-success {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+.slip-stress-body {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.slip-stress-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.slip-stress-stat .stat-label {
+  font-size: 0.725rem;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.slip-stress-stat .stat-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.slip-stress-stat .stat-sub {
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+/* Course Table */
+.slip-table-container {
+  margin-bottom: 1.25rem;
+}
+
+.slip-section-heading {
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #0f172a;
+  margin-bottom: 0.5rem;
+}
+
+.slip-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.825rem;
+}
+
+.slip-table th {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  border: 1px solid #334155;
+}
+
+.slip-table td {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  vertical-align: middle;
+}
+
+.slip-table tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
+.slip-table tr.row-conflict {
+  background-color: #fff1f2;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.code-cell strong {
+  color: #047857;
+  font-weight: 700;
+}
+
+.co-tag {
+  font-size: 0.7rem;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.title-cell {
+  font-weight: 500;
+}
+
+.capstone-pill {
+  font-size: 0.65rem;
+  background: #fef3c7;
+  color: #92400e;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 700;
+  margin-left: 0.4rem;
+}
+
+.units-cell {
+  font-weight: 700;
+}
+
+.prereq-cell {
+  font-size: 0.75rem;
+  color: #334155;
+}
+
+.none-muted {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.missing-alert {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #b91c1c;
+  margin-top: 0.15rem;
+}
+
+.badge-slip-success {
+  background: #dcfce7;
+  color: #15803d;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+
+.badge-slip-danger {
+  background: #fee2e2;
+  color: #b91c1c;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.7rem;
+}
+
+.slip-footer-row td {
+  background: #f1f5f9;
+  font-weight: 700;
+  border-top: 2px solid #0f172a;
+}
+
+.footer-label {
+  text-align: right;
+  font-size: 0.8rem;
+}
+
+.footer-units {
+  font-size: 1rem;
+  color: #047857;
+}
+
+.footer-notes {
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+/* Notes Block */
+.slip-notes-block {
+  background: #f8fafc;
+  border-left: 3px solid #047857;
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  color: #334155;
+  margin-bottom: 1.75rem;
+}
+
+.slip-notes-block ol {
+  margin: 0.35rem 0 0 1.25rem;
+  padding: 0;
+}
+
+.slip-notes-block li {
+  margin-bottom: 0.2rem;
+}
+
+/* Signatures */
+.slip-signatures-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+.slip-sign-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.slip-sign-line {
+  width: 100%;
+  border-bottom: 1px solid #0f172a;
+  margin-bottom: 0.4rem;
+}
+
+.slip-sign-name {
+  font-size: 0.825rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.slip-sign-role {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+
+.slip-sign-date {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+/* Footer watermark */
+.slip-doc-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.5rem;
+}
+
+/* PRINT MEDIA QUERY */
+@media print {
+  /* Hide all app chrome */
+  body * {
+    visibility: hidden;
+  }
+
+  .slip-modal-backdrop {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .slip-modal-container {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .no-print,
+  .slip-modal-toolbar {
+    display: none !important;
+  }
+
+  #printable-advising-slip,
+  #printable-advising-slip * {
+    visibility: visible !important;
+  }
+
+  #printable-advising-slip {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .slip-table th {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slip-crest {
+    background: #047857 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slip-stress-card {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .slip-signatures-grid {
+    page-break-inside: avoid;
+  }
+}
+
